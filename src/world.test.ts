@@ -269,14 +269,12 @@ test('sword, eating, zombie pathfinding, night spawning, fighting, and losing in
     assert.equal(zombie.root.visible, true);
     assert.ok(Math.hypot(zombie.root.position.x - player.x, zombie.root.position.z - player.z) >= 11);
     // Park the player far away: it wanders instead of chasing.
-    Object.assign(player, { x: 1.5, z: 1.5 });
     const far = zombie.root.position.clone();
     player.x = far.x > 16 ? 1.5 : 30.5; player.z = far.z > 16 ? 1.5 : 30.5;
     run(3);
     assert.equal(zombie.state, 'wander');
     // Step within sight: it chases, winds up, and only then lands a blow.
-    Object.assign(player, { x: zombie.root.position.x + 6, z: zombie.root.position.z });
-    player.x = Math.min(player.x, SIZE - 1.5);
+    Object.assign(player, { x: zombie.root.position.x + (zombie.root.position.x > 16 ? -6 : 6), z: zombie.root.position.z });
     run(.1);
     assert.equal(zombie.state, 'chase');
     let damage = 0, sawWindup = false;
@@ -303,8 +301,77 @@ test('sword, eating, zombie pathfinding, night spawning, fighting, and losing in
     Object.assign(player, { x: zombie.root.position.x > 16 ? .5 : 31.5, y: 1, z: zombie.root.position.z > 16 ? .5 : 31.5 });
     run(2);
     assert.equal(zombie.state, 'wander');
+    // Reloading mid-night: a live zombie comes back where it was; a killed one stays gone.
+    const alive = zombie.snapshot();
+    assert.equal(alive.spawned, true);
+    const reloaded = createZombie(arena);
+    reloaded.restore(alive);
+    assert.equal(reloaded.root.visible, true);
+    assert.deepEqual(reloaded.root.position.toArray(), [alive.position!.x, alive.position!.y, alive.position!.z]);
+    assert.equal(reloaded.health, alive.health);
+    const afterKill = createZombie(arena);
+    afterKill.restore({ spawned: true, health: 0, position: null, state: 'gone', timer: 0, knockX: 0, knockZ: 0 });
+    for (let i = 0; i < 120; i++) afterKill.update(1 / 120, true, player);
+    assert.equal(afterKill.root.visible, false);
+    // Reloading mid wind-up: the blow still lands, and no sooner than the saved timer allows.
+    const brawler = createZombie(arena);
+    Object.assign(player, { x: 16.5, y: 1, z: 16.5 });
+    brawler.restore({ spawned: true, health: 6, position: { x: 16.5, y: 1, z: 17.5 }, state: 'windup', timer: .3, knockX: 0, knockZ: 0 });
+    assert.equal(brawler.state, 'windup');
+    let landedAt = -1;
+    for (let i = 0; i < 120 && landedAt < 0; i++) if (brawler.update(1 / 120, true, player)) landedAt = i;
+    assert.ok(landedAt >= 35 && landedAt <= 37, `landed at tick ${landedAt}`);
+    // Out-of-range timers and unknown states are tamed rather than trusted.
+    const tampered = createZombie(arena);
+    tampered.restore({ spawned: true, health: 6, position: { x: 16.5, y: 1, z: 17.5 }, state: 'dance', timer: 99, knockX: 0, knockZ: 0 });
+    assert.equal(tampered.state, 'wander');
+    const staggered = createZombie(arena);
+    staggered.restore({ spawned: true, health: 6, position: { x: 16.5, y: 1, z: 17.5 }, state: 'stagger', timer: 99, knockX: 50, knockZ: 0 });
+    staggered.update(1 / 120, true, player);
+    assert.equal(staggered.state, 'stagger');
+    assert.ok(staggered.snapshot().timer <= .25 && staggered.snapshot().knockX === 6);
+    reloaded.dispose(); afterKill.dispose(); brawler.dispose(); tampered.dispose(); staggered.dispose();
     let disposed = 0;
     zombie.root.traverse(object => { if (object instanceof Mesh) (object.material as THREE.Material).addEventListener('dispose', () => disposed++); });
     zombie.dispose();
     assert.ok(disposed > 0);
+});
+
+import { clearSession, loadSession, saveSession } from './save.ts';
+test('session saves, validates untrusted data, and clears', () => {
+    const store = new Map<string, string>();
+    const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); }, removeItem: (k: string) => { store.delete(k); } };
+    assert.equal(loadSession(storage), null);
+    const world = generateWorld();
+    world.set(3, 20, 3, 7);
+    const counts = createInventory().counts; counts[SWORD] = 1;
+    const hotbar = [SWORD, 2, 1, 3, 4, 5, PLANKS, TABLE, PICKAXE, AXE];
+    assert.equal(saveSession({ world: world.data, counts, durability: counts.map(() => 0), health: 7, hotbar, selected: SWORD,
+        position: { x: 4.5, y: 9, z: 6.5 }, yaw: 1, pitch: -.2, phase: 4, animals: [true, false],
+        zombie: { spawned: true, health: 3, position: { x: 20.5, y: 9, z: 20.5 }, state: 'windup', timer: .2, knockX: 0, knockZ: 0 } }, storage), true);
+    const session = loadSession(storage)!;
+    assert.deepEqual(session.world, world.data);
+    assert.deepEqual([session.health, session.selected, session.counts[SWORD], session.phase, session.yaw], [7, SWORD, 1, 4, 1]);
+    assert.deepEqual(session.hotbar, hotbar);
+    assert.deepEqual(session.position, { x: 4.5, y: 9, z: 6.5 });
+    assert.deepEqual(session.animals, [true, false]);
+    assert.deepEqual(session.zombie, { spawned: true, health: 3, position: { x: 20.5, y: 9, z: 20.5 }, state: 'windup', timer: .2, knockX: 0, knockZ: 0 });
+    // Tampered or older saves: bad fields fall back, missing hotbar items are appended, broken worlds are rejected.
+    const data = JSON.parse(store.get('minecaves-session-v1')!);
+    store.set('minecaves-session-v1', JSON.stringify({ ...data, health: 99, hotbar: [SWORD, SWORD, 42, 1], selected: 'x', counts: [0, -5], position: { x: 'a' }, zombie: { spawned: 'yes', health: 50, position: { x: 1 }, state: 7, timer: 'soon' } }));
+    const repaired = loadSession(storage)!;
+    assert.equal(repaired.health, 3);
+    assert.deepEqual(repaired.hotbar, [SWORD, 1, 2, 3, 4, 5, PLANKS, TABLE, PICKAXE, AXE]);
+    assert.equal(repaired.selected, 1);
+    assert.equal(repaired.counts[1], 0);
+    assert.equal(repaired.counts.length, createInventory().counts.length);
+    assert.equal(repaired.position, null);
+    assert.deepEqual(repaired.zombie, { spawned: false, health: 0, position: null, state: 'wander', timer: 0, knockX: 0, knockZ: 0 });
+    store.set('minecaves-session-v1', JSON.stringify({ ...data, world: btoa('short') }));
+    assert.equal(loadSession(storage), null);
+    store.set('minecaves-session-v1', '{not json');
+    assert.equal(loadSession(storage), null);
+    clearSession(storage);
+    assert.equal(store.size, 0);
+    assert.equal(saveSession({ ...session }, { ...storage, setItem: () => { throw new Error('quota'); } }), false);
 });

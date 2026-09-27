@@ -73,7 +73,7 @@ function CraftingPanel({ inventory, table, previews, onCraft, onClose }: {
                     <ItemIcon id={index + 1} previews={previews} /><strong>{inventory.counts[index + 1]}</strong><span>{name}</span>
                 </div>)}</div>
                 <div className="crafting-tip"><strong>A little know-how</strong><p>Hold left click to gather. A pickaxe mines stone; an axe cuts wood faster. Each tool lasts {TOOL_USES} uses.</p><p>Zombies roam at night. A sword hits three times harder than your fist. Press F to eat raw chicken for a heart.</p><p>Right-click a placed table to open it. E opens your pack. Drag hotbar slots to rearrange them.</p></div>
-                <p className="session-note">This world and your pack reset on reload.</p>
+                <p className="session-note">Your world and pack are saved in this browser.</p>
             </section>
         </div>
     </dialog>;
@@ -114,6 +114,7 @@ function App() {
             <p>{started ? 'Your little corner of the world is right where you left it.' : 'Gather a little wood. Craft your first tools.\nBuild something that feels like you.'}</p>
             <button className="play" onClick={() => game.current?.play()} disabled={!game.current && !!error}>{started ? 'Back to the world' : 'Step into the world'}<span>↗</span></button>
             <button className="open-crafting" onClick={() => game.current?.openCrafting()}>Open pack & crafting <kbd>E</kbd></button>
+            <button className="new-world" onClick={() => { if (confirm('Start a new world? Your current world, pack, and hotbar will be erased.')) game.current?.newWorld(); }}>Start a new world</button>
             <div className="menu-note"><span>◈</span> GATHER. CRAFT. MAKE IT YOURS.</div>
             <div className="controls"><div><kbd>W</kbd><span className="key-row"><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><small>Wander</small></div><div><span className="mouse-icon">↕</span><small>Look around</small></div><div><kbd className="space">SPACE</kbd><small>Jump</small></div></div>
         </section>}
@@ -131,9 +132,7 @@ function App() {
                 onKeyDown={event => {
                     if (!event.altKey || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
                     event.preventDefault();
-                    const to = index + (event.key === 'ArrowLeft' ? -1 : 1);
-                    game.current?.swapSlots(index, to);
-                    (event.currentTarget.parentElement?.children[to] as HTMLElement | undefined)?.focus();
+                    game.current?.swapSlots(index, index + (event.key === 'ArrowLeft' ? -1 : 1));
                 }}>
                 <span className="slot-number">{(index + 1) % 10}</span><ItemIcon id={id} previews={previews} /><span className="slot-count">{inventory.counts[id]}</span><span className="slot-name">{id === PICKAXE ? 'Pickaxe' : id === AXE ? 'Axe' : id === SWORD ? 'Sword' : id === 7 ? 'Table' : ITEMS[id]}</span>
                 {id >= PICKAXE && inventory.counts[id] > 0 && <meter className="durability" min={0} max={TOOL_USES} value={inventory.durability[id]} aria-label={`${ITEMS[id]} durability`} />}

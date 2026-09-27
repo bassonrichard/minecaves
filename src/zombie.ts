@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { Player } from './player.ts';
 import { SIZE, type Vec3, type World } from './world.ts';
 
+export const ZOMBIE_HEALTH = 6;
+export type ZombieSave = { spawned: boolean; health: number; position: Vec3 | null; state: string; timer: number; knockX: number; knockZ: number };
 const SIGHT = 10, GIVE_UP = 16, LOST_SECONDS = 4, WINDUP = .45, STRIKE = .2, RECOVER = .9, STAGGER = .25;
 const REST_ARMS = -Math.PI / 2, RAISED_ARMS = -2.4, SLAMMED_ARMS = -.6;
 
@@ -52,6 +54,8 @@ export function findPath(world: World, from: Vec3, to: Vec3): Vec3[] | null {
 }
 
 type State = 'gone' | 'wander' | 'chase' | 'windup' | 'strike' | 'recover' | 'stagger';
+// Longest a restored timer may run in each live state.
+const TIMERS: Record<string, number> = { wander: 4, chase: 0, windup: WINDUP, strike: STRIKE, recover: RECOVER, stagger: STAGGER };
 
 export function createZombie(world: World) {
     const root = new THREE.Group();
@@ -104,16 +108,19 @@ export function createZombie(world: World) {
     const p = body.position;
 
     function despawn() { state = 'gone'; root.visible = false; path = []; }
+    function place(at: Vec3, hp: number) {
+        Object.assign(p, at);
+        body.velocityY = 0;
+        health = hp; spawned = true; state = 'wander'; timer = 0; path = []; root.visible = true;
+        root.position.set(p.x, p.y, p.z);
+    }
     function spawn(target: Vec3) {
         for (let tries = 0; tries < 200; tries++) {
             const x = Math.floor(Math.random() * SIZE), z = Math.floor(Math.random() * SIZE);
             let y = SIZE - 1;
             while (y > 0 && !world.get(x, y, z)) y--;
             if (![1, 2, 3].includes(world.get(x, y, z)) || !standable(world, x, y + 1, z) || Math.hypot(x + .5 - target.x, z + .5 - target.z) < 12) continue;
-            Object.assign(p, { x: x + .5, y: y + 1, z: z + .5 });
-            body.velocityY = 0;
-            health = 6; spawned = true; state = 'wander'; timer = 0; root.visible = true;
-            root.position.set(p.x, p.y, p.z);
+            place({ x: x + .5, y: y + 1, z: z + .5 }, ZOMBIE_HEALTH);
             return;
         }
     }
@@ -218,6 +225,22 @@ export function createZombie(world: World) {
             return false;
         },
         despawn,
+        // Tonight's zombie (or the fact it was already killed) survives a reload.
+        snapshot(): ZombieSave {
+            const gone = state === 'gone';
+            return { spawned, health: gone ? 0 : health, position: gone ? null : { ...p }, state, timer, knockX, knockZ };
+        },
+        // Picks up mid-fight: a wind-up still lands, a stagger still slides, a chase re-plans at once.
+        restore(saved: ZombieSave) {
+            spawned = saved.spawned;
+            if (!saved.position || saved.health <= 0) return;
+            place(saved.position, saved.health);
+            if (!Object.hasOwn(TIMERS, saved.state)) return;
+            state = saved.state as State;
+            timer = Math.min(TIMERS[state], Math.max(0, saved.timer));
+            knockX = Math.max(-6, Math.min(6, saved.knockX)); knockZ = Math.max(-6, Math.min(6, saved.knockZ));
+            repath = 0; lost = 0;
+        },
         dispose() { root.removeFromParent(); geometry.dispose(); materials.forEach(material => material.dispose()); },
     };
 }

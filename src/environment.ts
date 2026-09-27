@@ -89,7 +89,7 @@ function cloudTexture(random: () => number) {
     return texture;
 }
 
-export function createEnvironment(scene: THREE.Scene) {
+export function createEnvironment(scene: THREE.Scene, startPhase = Math.PI / 3) {
     let seed = 9281;
     const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
 
@@ -153,7 +153,7 @@ export function createEnvironment(scene: THREE.Scene) {
     scene.add(sunLight, moonLight, hemiLight);
 
     const sunDir = skyUniforms.uSunDir.value, moonDir = skyUniforms.uMoonDir.value;
-    let phase = Math.PI / 3; // mid-morning
+    let phase = startPhase; // default is mid-morning
     const update = (dt: number, camera?: THREE.Camera) => {
         phase = (phase + dt * Math.PI * 2 / DAY_LENGTH) % (Math.PI * 2);
         sunDir.set(Math.cos(phase), Math.sin(phase), .25).normalize();
@@ -194,6 +194,7 @@ export function createEnvironment(scene: THREE.Scene) {
     return {
         update,
         night: () => sunDir.y < 0,
+        phase: () => phase,
         dispose() {
             scene.remove(sky, stars, clouds, sunLight, moonLight, hemiLight);
             sky.geometry.dispose(); skyMaterial.dispose();

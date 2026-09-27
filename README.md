@@ -11,7 +11,7 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite in a desktop browser with WebGL and a mouse. Click **Step into the world** to capture your pointer. Use WASD to move, the mouse to look, Space to jump, hold left-click to gather, right-click to place/use, and 1–9 to choose a block or tool. Press E while playing to open your pack and crafting. You can also open it from the pause menu. Escape pauses and releases the pointer. Clicking a hotbar slot while paused also selects it. Blocks have a five-unit reach.
+Open the local URL printed by Vite in a desktop browser with WebGL and a mouse. Click **Step into the world** to capture your pointer. Use WASD to move, the mouse to look, Space to jump, hold left-click to gather, right-click to place/use, 1–9 then 0 to choose a hotbar slot (left to right), and F to eat raw chicken. Press E while playing to open your pack and crafting. You can also open it from the pause menu. Escape pauses and releases the pointer. Clicking a hotbar slot while paused also selects it; drag slots (or Alt+←/→ on a focused slot) to rearrange them. Blocks have a five-unit reach.
 
 ```sh
 npm test
@@ -20,7 +20,7 @@ npm run build
 npm run preview
 ```
 
-The world is 32 × 32 × 32. You start with an empty pack: gathering adds blocks and placement consumes them. Reloading resets it to the same landscape. The bottom layer cannot be broken, and horizontal borders are solid boundaries. Saving, caves, health/hunger, infinite terrain, and multiplayer are not implemented.
+The world is 32 × 32 × 32. You start with an empty pack: gathering adds blocks and placement consumes them. Your session (world edits, pack, health, hotbar order and selection, position and view, time of day, defeated chickens, and tonight's zombie: its position, health, and what it was doing, so a wind-up still lands and a stagger still slides; or that it was already killed) is saved to this browser's `localStorage` every 5 seconds while playing, on pause, after crafting or rearranging the hotbar, and when the page is closed or reloaded. **Start a new world** on the pause menu erases it. The bottom layer cannot be broken, and horizontal borders are solid boundaries. Caves, hunger, infinite terrain, and multiplayer are not implemented.
 
 ## Your first tools
 
@@ -32,13 +32,19 @@ The world is 32 × 32 × 32. You start with an empty pack: gathering adds blocks
 
 Crafting uses a recipe list rather than a drag-and-drop grid. Disabled buttons show missing materials or a missing nearby table. Holding a table in your pack does not unlock tool recipes: place it first. Breaking a table returns it to your pack. Opening crafting pauses movement and mining; Escape or E closes it to the pause menu.
 
-Hotbar: **1** grass, **2** dirt, **3** stone, **4** wood, **5** leaves, **6** planks, **7** table, **8** pickaxe, **9** axe. Sticks stay in your pack for crafting. An empty hotbar slot mines with bare hands; bare hands cannot harvest stone. All gathered blocks return their own block type. Tools and inventory reset on reload, together with the world.
+Default hotbar: **1** grass, **2** dirt, **3** stone, **4** wood, **5** leaves, **6** planks, **7** table, **8** pickaxe, **9** axe, **0** sword. Sticks stay in your pack for crafting. An empty hotbar slot mines with bare hands; bare hands cannot harvest stone. All gathered blocks return their own block type.
 
 ## Wildlife
 
 The world starts with four chickens, three geckos, and a friendly snake named Garry Da Snake. They are built from small Three.js box meshes, so they keep the same blocky style as the terrain. Chickens peck, flap their wings, and wander slowly; the geckos now have low bodies, long tapering tails, splayed feet, narrow snouts, big side-set eyes, pupils, and rosy cheek spots; Garry wiggles and flicks his tongue. Animals only walk on clear, level patches and relocate if building or digging removes the ground beneath them.
 
 Click a chicken to hit it. Chickens have three hearts and drop feathers and chicken meat when defeated. Loot goes into your pack and is shown in the crafting inventory. Geckos and Garry are friendly and cannot be damaged.
+
+## Health and zombies
+
+You start with 3 of 10 hearts, shown as pixel hearts above the hotbar. Press F to eat one raw chicken for +1 heart (up to 10). Craft a wooden sword at a table (2 planks + 1 stick): it deals 3 damage instead of 1 and wears like other tools.
+
+One zombie spawns each night at least 12 blocks away and despawns at sunrise. It wanders until you come within 10 blocks, then paths to you (BFS over walkable cells: climbs one block, drops up to three) and gives up if you get more than 16 blocks away or it can't find a route for 4 seconds. Up close it raises its arms before slamming down for 1 heart, backs off, and staggers back when hit. It has 6 health: two sword hits. Kill it and it stays gone until the next night, even across reloads. At 0 hearts you respawn at the start with 3 hearts and an empty pack.
 
 `src/animals.ts` owns their meshes, health, loot, idle animations, movement, safe-ground checks, and cleanup. Wildlife is added as one scene group and disposed together with the game so React remounts do not leave duplicate animals or GPU resources behind.
 
@@ -62,6 +68,6 @@ Append its name to `BLOCKS`, add a texture tile and preview in `makeAtlas`, and 
 
 ## Checks
 
-The small Node test covers bounds, deterministic generation, exposed face counts, falling/jumping, walls, ceilings, world borders, and block placement/removal rules. A second end-to-end logic check covers gathering, recipe costs, table proximity, tools, durability, failed transactions, and atlas UVs for new blocks. Wildlife tests cover eight spawns, safe terrain, movement, recovery after terrain edits, chicken damage/loot, and resource disposal. Environment tests cover day-to-night transition, stars, and cleanup. Browser checks should cover pointer capture, mouse look, edits and target outline, hotbar changes, Escape/re-entry, focus loss, resizing, and React remount cleanup.
+The small Node test covers bounds, deterministic generation, exposed face counts, falling/jumping, walls, ceilings, world borders, and block placement/removal rules. A second end-to-end logic check covers gathering, recipe costs, table proximity, tools, durability, failed transactions, and atlas UVs for new blocks. Wildlife tests cover eight spawns, safe terrain, movement, recovery after terrain edits, chicken damage/loot, and resource disposal. Zombie tests cover the sword recipe, eating, pathfinding around walls and up steps, night-only spawning, sight/give-up ranges, wind-up before damage, sword kills, and next-night respawn. Environment tests cover day-to-night transition, stars, and cleanup. Browser checks should cover pointer capture, mouse look, edits and target outline, hotbar changes, Escape/re-entry, focus loss, resizing, and React remount cleanup.
 
 Fonts use Google Fonts with local sans-serif fallbacks. All terrain textures work offline.

@@ -6,6 +6,7 @@ import { Player } from './player.ts';
 import { makeAtlas, terrainGeometry } from './terrain.ts';
 import { createEnvironment } from './environment.ts';
 import { createZombie } from './zombie.ts';
+import { clearSession, loadSession, saveSession } from './save.ts';
 import { CHICKEN_MEAT, FEATHER, HOTBAR, MAX_HEALTH, START_HEALTH, SWORD, TABLE, attackDamage, createInventory, craft, eat, tableNearby, miningSeconds, harvest, place, wear, type Inventory } from './crafting.ts';
 type Callbacks = {
     locked: (value: boolean) => void;
@@ -26,11 +27,16 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color('#b9d6da');
     scene.fog = new THREE.Fog('#b9d6da', 35, 75);
-    const environment = createEnvironment(scene);
+    const saved = loadSession();
+    const environment = createEnvironment(scene, saved?.phase ?? undefined);
     const camera = new THREE.PerspectiveCamera(70, 1, .05, 120);
-    const world = generateWorld(), player = new Player(world);
+    const world = generateWorld();
+    if (saved) world.data.set(saved.world);
+    const player = new Player(world);
+    if (saved?.position) Object.assign(player.position, saved.position);
     camera.position.set(player.position.x, player.position.y + 1.62, player.position.z);
-    camera.rotation.set(-.16, -.35, 0);
+    if (saved?.yaw != null && saved.pitch != null) camera.quaternion.setFromEuler(new THREE.Euler(saved.pitch, saved.yaw, 0, 'YXZ'));
+    else camera.rotation.set(-.16, -.35, 0);
     const controls = new PointerLockControls(camera, renderer.domElement);
     const { texture, previews } = makeAtlas();
     callbacks.previews(previews);
@@ -38,9 +44,12 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
     const terrain = new THREE.Mesh(terrainGeometry(world), material);
     scene.add(terrain);
     const wildlife = createAnimals(world);
+    // Chickens killed before the reload stay gone.
+    saved?.animals.forEach((alive, i) => { if (!alive && wildlife.group.children[i]) wildlife.group.children[i].visible = false; });
     scene.add(wildlife.group);
     const zombie = createZombie(world);
     scene.add(zombie.root);
+    if (saved) zombie.restore(saved.zombie);
     const outlineGeometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(1.006, 1.006, 1.006));
     const outlineMaterial = new THREE.LineBasicMaterial({ color: '#fff3ce' });
     const outline = new THREE.LineSegments(outlineGeometry, outlineMaterial);
@@ -60,8 +69,9 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
         }
     }
     function resetMining() { miningHeld = false; miningTarget = ''; miningTime = 0; miningStatus(0, ''); }
-    let health = START_HEALTH, knockX = 0, knockZ = 0;
-    const hotbar = [...HOTBAR];
+    if (saved) { inventory.counts = saved.counts; inventory.durability = saved.durability; }
+    let health = saved?.health ?? START_HEALTH, knockX = 0, knockZ = 0;
+    const hotbar = saved?.hotbar ?? [...HOTBAR];
     callbacks.health(health, false);
     callbacks.hotbar([...hotbar]);
     function hurt(damage: number) {
@@ -87,11 +97,22 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
         camera.quaternion.setFromEuler(view);
     }
     publishInventory();
-    let selected = 1, disposed = false, frame = 0, previous = performance.now(), accumulator = 0;
+    let selected = saved?.selected ?? 1, disposed = false, resetting = false, saveFailed = false, sinceSave = 0, frame = 0, previous = performance.now(), accumulator = 0;
     const listeners: (() => void)[] = [];
     function listen(target: EventTarget, name: string, callback: EventListener) {
         target.addEventListener(name, callback);
         listeners.push(() => target.removeEventListener(name, callback));
+    }
+    callbacks.selected(selected);
+    function save() {
+        if (resetting) return;
+        const view = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+        const stored = saveSession({
+            world: world.data, counts: inventory.counts, durability: inventory.durability, health, hotbar, selected,
+            position: player.position, yaw: view.y, pitch: view.x, phase: environment.phase(),
+            animals: wildlife.group.children.map(animal => animal.visible), zombie: zombie.snapshot(),
+        });
+        if (!stored && !saveFailed) { saveFailed = true; callbacks.error('This browser is blocking storage, so your world will not be saved across reloads.'); }
     }
     function hit() { camera.updateMatrixWorld(); raycaster.setFromCamera(new THREE.Vector2(), camera); return raycaster.intersectObject(terrain, false)[0]; }
     function select(id: number) {
@@ -100,6 +121,8 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
     }
     function pause() { keys.clear(); resetMining(); if (controls.isLocked) controls.unlock(); }
     function openCrafting() {
+        // Opened mid-game (E or a table): closing goes straight back to the world, not the pause menu.
+        resumeAfterCrafting = controls.isLocked;
         craftingOpen = true; pause(); callbacks.crafting(true, tableNearby(world, player.position));
     }
     function rebuild() {
@@ -107,8 +130,12 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
         const old = terrain.geometry; terrain.geometry = terrainGeometry(world); old.dispose();
     }
     controls.addEventListener('lock', () => { callbacks.locked(true); keys.clear(); accumulator = 0; });
-    controls.addEventListener('unlock', () => { callbacks.locked(false); keys.clear(); resetMining(); outline.visible = false; });
-    listen(document, 'pointerlockerror', () => callbacks.error('Mouse capture was blocked. Retry, or open this page in a desktop browser such as Chrome.'));
+    controls.addEventListener('unlock', () => { callbacks.locked(false); keys.clear(); resetMining(); outline.visible = false; save(); });
+    listen(window, 'pagehide', save);
+    listen(document, 'pointerlockerror', () => {
+        callbacks.locked(controls.isLocked);
+        if (!quietLock) callbacks.error('Mouse capture was blocked. Retry, or open this page in a desktop browser such as Chrome.');
+    });
     listen(renderer.domElement, 'webglcontextlost', (event) => { event.preventDefault(); pause(); callbacks.error('The graphics context was lost. Reload this page to restart the world.'); });
     listen(window, 'blur', pause);
     listen(document, 'visibilitychange', () => { if (document.hidden)
@@ -176,6 +203,23 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
             rebuild(); publishInventory();
         }
     });
+    let resumeAfterCrafting = false, quietLock = false;
+    async function play(quiet = false) {
+        if (disposed) return;
+        craftingOpen = false; callbacks.crafting(false, false);
+        callbacks.error('');
+        // Returning from crafting: show the world right away; the pause menu appears only if the browser refuses the lock.
+        quietLock = quiet;
+        if (quiet) callbacks.locked(true);
+        try {
+            // The native promise lets us catch failures; controls listens for the lock event.
+            await renderer.domElement.requestPointerLock();
+        } catch {
+            if (disposed) return;
+            callbacks.locked(controls.isLocked);
+            if (!quiet) callbacks.error('Mouse capture was blocked. Retry, or open this page in a desktop browser such as Chrome.');
+        }
+    }
     const resize = () => { const { width, height } = host.getBoundingClientRect(); renderer.setSize(width, height); camera.aspect = width / Math.max(1, height); camera.updateProjectionMatrix(); };
     const observer = new ResizeObserver(resize);
     observer.observe(host);
@@ -190,6 +234,9 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
         if (controls.isLocked) {
             wildlife.update(elapsed);
             accumulator += elapsed;
+            // Autosave while playing; pausing and leaving the page save too.
+            sinceSave += elapsed;
+            if (sinceSave > 5) { sinceSave = 0; save(); }
             camera.getWorldDirection(direction);
             direction.y = 0;
             direction.normalize();
@@ -240,30 +287,29 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
     }
     frame = requestAnimationFrame(animate);
     return {
-        async play() {
-            if (disposed) return;
-            craftingOpen = false; callbacks.crafting(false, false);
-            callbacks.error('');
-            try {
-                // The native promise lets us catch failures; controls listens for the lock event.
-                await renderer.domElement.requestPointerLock();
-            } catch {
-                if (!disposed) callbacks.error('Mouse capture was blocked. Retry, or open this page in a desktop browser such as Chrome.');
-            }
-        },
+        play: () => play(),
         select,
         // Swap two hotbar positions (drag and drop or Alt+arrow in the UI).
         swapSlots(a: number, b: number) {
             if (!hotbar[a] || !hotbar[b] || a === b) return;
             [hotbar[a], hotbar[b]] = [hotbar[b], hotbar[a]];
             callbacks.hotbar([...hotbar]);
+            save();
+        },
+        newWorld() {
+            resetting = true;
+            clearSession();
+            location.reload();
         },
         openCrafting,
-        closeCrafting() { craftingOpen = false; callbacks.crafting(false, false); },
+        closeCrafting() {
+            if (resumeAfterCrafting) { resumeAfterCrafting = false; play(true); return; }
+            craftingOpen = false; callbacks.crafting(false, false);
+        },
         craft(recipeId: string) {
             if (!craftingOpen) return;
             const table = tableNearby(world, player.position);
-            if (craft(inventory, recipeId, table)) publishInventory();
+            if (craft(inventory, recipeId, table)) { publishInventory(); save(); }
             callbacks.crafting(true, table);
         },
         dispose() {
