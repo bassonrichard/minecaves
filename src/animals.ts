@@ -1,15 +1,35 @@
 import * as THREE from 'three';
-import { SIZE, type World } from './world.ts';
+import { CHICKEN_MEAT, FEATHER, MUTTON, WOOL, type Stack } from './crafting.ts';
+import { BIOME_SIZE, CACTUS, SEA_LEVEL, SIZE_X, SIZE_Y, SIZE_Z, WATER, biomeAt, biomeOrigin, type Biome, type World } from './world.ts';
 
-// A tiny local terrain check is enough for five animals in this bounded world.
+// Chickens, geckos, and Garry keep their original slots (0–7) so saved defeats line up; new animals go at the end.
+const SPECS: { kind: string; biome: Biome; radius: number; height: number; speed: number; starts: number[][] }[] = [
+    { kind: 'chicken', biome: 'plains', radius: .56, height: 1.3, speed: .55, starts: [[43, 43], [54, 44], [44, 54], [56, 56]] },
+    { kind: 'gecko', biome: 'desert', radius: .48, height: 1.15, speed: .7, starts: [[74, 42], [84, 50], [78, 58]] },
+    { kind: 'snake', biome: 'forest', radius: .86, height: .5, speed: .35, starts: [[80, 12]] },
+    { kind: 'cat', biome: 'plains', radius: .5, height: .9, speed: .6, starts: [[50, 38]] },
+    { kind: 'fish', biome: 'ocean', radius: .3, height: .4, speed: .9, starts: [[8, 42], [14, 52], [6, 58]] },
+    // Sheep check only the cell under their middle, so they can hop from one terrace of the slope to the next.
+    { kind: 'sheep', biome: 'mountain', radius: .05, height: 1.1, speed: .45, starts: [[36, 27], [59, 5], [58, 27]] },
+];
+// What each huntable animal drops: [item, fewest, most]. Everything else is friendly and can't be hurt.
+const LOOT: Record<string, [number, number, number][]> = {
+    chicken: [[FEATHER, 1, 2], [CHICKEN_MEAT, 1, 2]],
+    sheep: [[WOOL, 1, 2], [MUTTON, 1, 2]],
+};
+// Fish cruise one block under the surface.
+const FISH_Y = SEA_LEVEL - .6;
+
+// A tiny local terrain check is enough for a dozen animals in this bounded world.
 export function animalGround(world: World, x: number, z: number, radius: number, height: number) {
-    if (x - radius < 0 || z - radius < 0 || x + radius > SIZE || z + radius > SIZE) return null;
-    let highest = 0, lowest = SIZE;
+    if (x - radius < 0 || z - radius < 0 || x + radius > SIZE_X || z + radius > SIZE_Z) return null;
+    let highest = 0, lowest = SIZE_Y;
     for (let ix = Math.floor(x - radius); ix <= Math.floor(x + radius - 1e-6); ix++) {
         for (let iz = Math.floor(z - radius); iz <= Math.floor(z + radius - 1e-6); iz++) {
-            let y = SIZE - 1;
+            let y = SIZE_Y - 1;
             while (y >= 0 && !world.get(ix, y, iz)) y--;
-            if (y < 0 || y + 1 + height > SIZE || world.get(ix, y, iz) === 5) return null;
+            // Land animals avoid treetops, water, and cacti.
+            if (y < 0 || y + 1 + height > SIZE_Y || [5, WATER, CACTUS].includes(world.get(ix, y, iz))) return null;
             highest = Math.max(highest, y + 1);
             lowest = Math.min(lowest, y + 1);
         }
@@ -21,7 +41,7 @@ export function createAnimals(world: World) {
     const group = new THREE.Group();
     group.name = 'Friendly wildlife';
     const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const colors = ['#fff3d6', '#e3d5b2', '#edb743', '#dc6355', '#263e30', '#a7cf77', '#7eaf63', '#f3d7a6', '#ec9d9e', '#7cc47a', '#cfe8b0', '#5aa866', '#6b2a3a', '#2f5a36'];
+    const colors = ['#fff3d6', '#e3d5b2', '#edb743', '#dc6355', '#263e30', '#a7cf77', '#7eaf63', '#f3d7a6', '#ec9d9e', '#7cc47a', '#cfe8b0', '#5aa866', '#6b2a3a', '#2f5a36', '#e59a4a', '#b8692c', '#f7e3c4', '#6fbf4a', '#ff9f40', '#4aa3df', '#f1eee6', '#6e6a64', '#dcd8cf'];
     const materials = colors.map(color => new THREE.MeshLambertMaterial({ color }));
     function box(parent: THREE.Group, color: number, x: number, y: number, z: number, w: number, h: number, d: number) {
         const mesh = new THREE.Mesh(geometry, materials[color]);
@@ -113,29 +133,94 @@ export function createAnimals(world: World) {
         }
         return { root, legs, arms, tail, head, eyes };
     }
-    function settle(root: THREE.Group, radius: number, height: number, sx: number, sz: number) {
+    function cat() {
+        const root = new THREE.Group(); root.name = 'Cat';
+        box(root, 14, 0, .36, 0, .3, .26, .6);
+        for (const z of [-.12, .06]) box(root, 15, 0, .495, z, .31, .03, .08);
+        box(root, 16, 0, .23, .05, .2, .03, .4);
+        const legs = [[-1, 1], [1, 1], [-1, -1], [1, -1]].map(([sx, sz]) => {
+            const leg = new THREE.Group(); leg.position.set(sx * .09, .24, sz * .2); root.add(leg);
+            box(leg, 14, 0, -.12, 0, .08, .24, .08);
+            box(leg, 16, 0, -.225, .01, .085, .03, .09);
+            return leg;
+        });
+        const head = new THREE.Group(); head.position.set(0, .55, .33); root.add(head);
+        box(head, 14, 0, 0, 0, .3, .26, .26);
+        box(head, 16, 0, -.06, .14, .14, .1, .04);
+        box(head, 8, 0, -.02, .165, .04, .03, .02);
+        for (const side of [-1, 1]) {
+            box(head, 14, side * .1, .17, -.02, .07, .1, .06);
+            box(head, 8, side * .1, .16, .015, .035, .06, .01);
+            box(head, 17, side * .075, .04, .135, .06, .05, .01);
+            box(head, 4, side * .075, .04, .141, .02, .05, .01);
+        }
+        const tail = new THREE.Group(); tail.position.set(0, .45, -.3); root.add(tail);
+        box(tail, 14, 0, .12, -.04, .06, .26, .06).rotation.x = -.3;
+        box(tail, 15, 0, .26, -.08, .065, .07, .065);
+        return { root, legs, head, tail };
+    }
+    function sheep() {
+        const root = new THREE.Group(); root.name = 'Sheep';
+        box(root, 20, 0, .62, 0, .56, .46, .8);
+        box(root, 22, 0, .87, -.05, .46, .06, .6);
+        const legs = [[-1, 1], [1, 1], [-1, -1], [1, -1]].map(([sx, sz]) => {
+            const leg = new THREE.Group(); leg.position.set(sx * .17, .4, sz * .26); root.add(leg);
+            box(leg, 21, 0, -.2, 0, .12, .4, .12);
+            return leg;
+        });
+        const head = new THREE.Group(); head.position.set(0, .8, .42); root.add(head);
+        box(head, 21, 0, 0, .1, .28, .3, .3);
+        box(head, 20, 0, .17, .06, .32, .1, .26);
+        for (const side of [-1, 1]) {
+            box(head, 21, side * .18, .05, .04, .1, .05, .08);
+            box(head, 0, side * .1, .05, .255, .06, .05, .01);
+            box(head, 4, side * .1, .05, .26, .03, .05, .01);
+        }
+        return { root, legs, head };
+    }
+    function fish(color: number) {
+        const root = new THREE.Group(); root.name = 'Fish';
+        box(root, color, 0, 0, 0, .12, .2, .34);
+        box(root, 0, 0, -.06, .03, .1, .07, .24);
+        box(root, color, 0, .13, -.02, .02, .07, .14);
+        for (const side of [-1, 1]) {
+            box(root, 0, side * .061, .04, .1, .01, .05, .05);
+            box(root, 4, side * .066, .04, .105, .01, .025, .025);
+        }
+        const tail = new THREE.Group(); tail.position.z = -.17; root.add(tail);
+        box(tail, color, 0, 0, -.07, .03, .2, .14);
+        return { root, tail };
+    }
+    // Nearest clear patch to (sx, sz) inside the animal's own biome; never in trees, water, or blocks.
+    function settle(root: THREE.Group, spec: typeof SPECS[number], sx: number, sz: number) {
+        const origin = biomeOrigin(spec.biome);
         let best = Infinity;
-        for (let x = 1; x < SIZE - 1; x += .5) for (let z = 1; z < SIZE - 1; z += .5) {
-            const y = animalGround(world, x, z, radius, height);
+        for (let x = origin.x + 1; x < origin.x + BIOME_SIZE - 1; x += .5) for (let z = origin.z + 1; z < origin.z + BIOME_SIZE - 1; z += .5) {
+            const y = spec.kind === 'fish' ? (swimmable(x, z) ? FISH_Y : null) : animalGround(world, x, z, spec.radius, spec.height);
             const distance = (x - sx) ** 2 + (z - sz) ** 2;
             if (y !== null && distance < best) { root.position.set(x, y, z); best = distance; }
         }
         root.visible = best < Infinity;
     }
-    const birds = Array.from({ length: 4 }, chicken);
-    const geckos = Array.from({ length: 3 }, gecko);
-    const noodle = snake();
-    const roots = [...birds.map(bird => bird.root), ...geckos.map(gecko => gecko.root), noodle.root];
-    const starts = [[15.5, 24.5], [22.5, 26.5], [12.5, 22.5], [24.5, 17.5], [8, 21], [18, 16], [26, 25], [21, 25]];
-    const animals = roots.map((root, i) => {
-        const radius = i >= 7 ? .86 : i >= 4 ? .48 : .56, height = i >= 7 ? .5 : i >= 4 ? 1.15 : 1.3;
-        const [sx, sz] = starts[i];
-        // Find a clear patch near the chosen spawn; never spawn in trees or blocks.
-        settle(root, radius, height, sx, sz);
+    // Two blocks of water under the surface at this spot.
+    const swimmable = (x: number, z: number) => world.get(Math.floor(x), SEA_LEVEL, Math.floor(z)) === WATER && world.get(Math.floor(x), SEA_LEVEL - 1, Math.floor(z)) === WATER;
+    const birds: ReturnType<typeof chicken>[] = [], geckos: ReturnType<typeof gecko>[] = [], cats: ReturnType<typeof cat>[] = [], fishes: ReturnType<typeof fish>[] = [], flock: ReturnType<typeof sheep>[] = [];
+    let noodle: ReturnType<typeof snake> | null = null;
+    const animals = SPECS.flatMap(spec => spec.starts.map(([sx, sz], n) => {
+        let root: THREE.Group;
+        if (spec.kind === 'chicken') root = birds[birds.push(chicken()) - 1].root;
+        else if (spec.kind === 'gecko') root = geckos[geckos.push(gecko()) - 1].root;
+        else if (spec.kind === 'cat') root = cats[cats.push(cat()) - 1].root;
+        else if (spec.kind === 'fish') root = fishes[fishes.push(fish(n % 2 ? 19 : 18)) - 1].root;
+        else if (spec.kind === 'sheep') root = flock[flock.push(sheep()) - 1].root;
+        else root = (noodle = snake()).root;
+        return { root, spec, part: n, sx, sz };
+    })).map(({ root, spec, part, sx, sz }, i) => {
+        settle(root, spec, sx, sz);
         root.rotation.y = i * 1.6 + 1;
-        root.userData.animal = i < birds.length ? 'chicken' : i >= 7 ? 'snake' : 'gecko';
+        Object.assign(root.userData, { animal: spec.kind, radius: spec.radius, height: spec.height });
         group.add(root);
-        return { root, radius, height, timer: .6 + i * .3, turns: i, idle: false, health: i < birds.length ? 3 : Infinity };
+        return { root, spec, part, sx, sz, timer: .6 + i * .3, turns: i, idle: false, health: LOOT[spec.kind] ? 3 : Infinity };
     });
     let time = 0;
     return {
@@ -143,12 +228,13 @@ export function createAnimals(world: World) {
         update(dt: number) {
             time += dt;
             animals.forEach((animal, i) => {
-                const { root, radius, height } = animal;
+                const { root, spec } = animal;
                 if (!root.visible) return;
-                const ground = animalGround(world, root.position.x, root.position.z, radius, height);
+                const fishy = spec.kind === 'fish';
+                const ground = fishy ? (swimmable(root.position.x, root.position.z) ? FISH_Y : null) : animalGround(world, root.position.x, root.position.z, spec.radius, spec.height);
                 if (ground === null) {
-                    // A player may build into or dig away an animal's patch.
-                    settle(root, radius, height, root.position.x, root.position.z);
+                    // A player may build into, dig away, or fill in an animal's patch.
+                    settle(root, spec, root.position.x, root.position.z);
                     return;
                 }
                 root.position.y = ground;
@@ -160,41 +246,65 @@ export function createAnimals(world: World) {
                     animal.timer = animal.idle ? 1.5 : 2.5;
                 }
                 if (!animal.idle) {
-                    const speed = i >= 7 ? .35 : i >= 4 ? .7 : .55;
-                    const x = root.position.x + Math.sin(root.rotation.y) * speed * dt;
-                    const z = root.position.z + Math.cos(root.rotation.y) * speed * dt;
-                    const y = animalGround(world, x, z, radius, height);
-                    // ponytail: wander on clear level patches; add pathfinding if animals need destinations.
-                    if (y !== null && Math.abs(y - root.position.y) < .01) root.position.set(x, y, z);
+                    const x = root.position.x + Math.sin(root.rotation.y) * spec.speed * dt;
+                    const z = root.position.z + Math.cos(root.rotation.y) * spec.speed * dt;
+                    // Fish look a little ahead so their noses stay in the water.
+                    const y = biomeAt(x, z) !== spec.biome ? null : fishy
+                        ? (swimmable(x + Math.sin(root.rotation.y) * .3, z + Math.cos(root.rotation.y) * .3) ? FISH_Y : null)
+                        : animalGround(world, x, z, spec.radius, spec.height);
+                    // ponytail: wander on clear level patches inside the home biome; add pathfinding if animals need destinations.
+                    // Sheep live on the mountain's slopes, so they hop up and down single blocks.
+                    if (y !== null && Math.abs(y - root.position.y) < (spec.kind === 'sheep' ? 1.01 : .01)) root.position.set(x, y, z);
                     else { root.rotation.y += 1.2; animal.timer = .5; }
                 }
-                if (i < birds.length) {
-                    const bird = birds[i], stride = animal.idle ? 0 : Math.sin(time * 11 + i) * .35;
-                    bird.legs[0].rotation.x = stride; bird.legs[1].rotation.x = -stride;
+                const stride = animal.idle ? 0 : Math.sin(time * 10 + i) * .45;
+                if (spec.kind === 'chicken') {
+                    const bird = birds[animal.part], step = animal.idle ? 0 : Math.sin(time * 11 + i) * .35;
+                    bird.legs[0].rotation.x = step; bird.legs[1].rotation.x = -step;
                     bird.head.rotation.x = animal.idle ? Math.max(0, Math.sin(time * 5 + i)) * .65 : 0;
                     bird.wings.forEach((wing, side) => { wing.rotation.z = Math.sin(time * 3 + i) * .06 * (side ? 1 : -1); });
-                } else if (i >= 7) {
+                } else if (spec.kind === 'snake' && noodle) {
                     noodle.segments.forEach((segment, j) => { segment.position.x = Math.sin(time * 5 - j * .65) * .09; });
                     noodle.head.rotation.y = Math.sin(time * 2) * .13;
                     noodle.tongue.visible = Math.sin(time * 2.5) > .8;
-                } else {
-                    const gecko = geckos[i - birds.length];
-                    const stride = animal.idle ? 0 : Math.sin(time * 10 + i) * .45;
+                } else if (spec.kind === 'gecko') {
+                    const gecko = geckos[animal.part];
                     gecko.legs.forEach((leg, j) => { leg.rotation.x = (j ? -1 : 1) * stride; });
                     gecko.arms.forEach((arm, j) => { arm.rotation.x = (j ? 1 : -1) * stride * .6; });
                     gecko.tail.rotation.y = Math.sin(time * (animal.idle ? 2 : 6) + i) * .25;
                     gecko.head.rotation.z = animal.idle ? Math.sin(time * 3 + i) * .15 : 0;
+                } else if (spec.kind === 'sheep') {
+                    const lamb = flock[animal.part];
+                    lamb.legs.forEach((leg, j) => { leg.rotation.x = (j === 0 || j === 3 ? 1 : -1) * stride; });
+                    lamb.head.rotation.x = animal.idle ? Math.max(0, Math.sin(time * 1.5 + i)) * .7 : 0;
+                } else if (spec.kind === 'cat') {
+                    const kitty = cats[animal.part];
+                    kitty.legs.forEach((leg, j) => { leg.rotation.x = (j === 0 || j === 3 ? 1 : -1) * stride; });
+                    kitty.tail.rotation.z = Math.sin(time * (animal.idle ? 1.5 : 4) + i) * .35;
+                    kitty.head.rotation.y = animal.idle ? Math.sin(time * 1.2 + i) * .4 : 0;
+                } else {
+                    fishes[animal.part].tail.rotation.y = Math.sin(time * (animal.idle ? 4 : 12) + i) * .5;
+                    root.position.y = FISH_Y + Math.sin(time * 1.5 + i) * .08;
                 }
             });
         },
-        damage(target: THREE.Object3D, amount = 1) {
+        // Hits a huntable animal. Returns its loot once it's defeated, or null for friendly ones.
+        damage(target: THREE.Object3D, amount = 1): { dead: boolean; drops: Stack[] } | null {
             const animal = animals.find(candidate => candidate.root.getObjectById(target.id));
-            if (!animal || animal.root.userData.animal !== 'chicken') return null;
+            const loot = animal && LOOT[animal.spec.kind];
+            if (!animal || !loot) return null;
             animal.health -= amount;
             animal.root.position.y += .12;
-            if (animal.health > 0) return { dead: false, feathers: 0, meat: 0 };
+            if (animal.health > 0) return { dead: false, drops: [] };
             animal.root.visible = false;
-            return { dead: true, feathers: 1 + Math.floor(Math.random() * 2), meat: 1 + Math.floor(Math.random() * 2) };
+            return { dead: true, drops: loot.map(([id, min, max]) => ({ id, count: min + Math.floor(Math.random() * (max - min + 1)), durability: 0 })) };
+        },
+        // Dawn: everyone comes back to their starting spot, healed; defeated animals return too.
+        respawn() {
+            animals.forEach(animal => {
+                animal.health = LOOT[animal.spec.kind] ? 3 : Infinity;
+                settle(animal.root, animal.spec, animal.sx, animal.sz);
+            });
         },
         dispose() { group.removeFromParent(); geometry.dispose(); materials.forEach(material => material.dispose()); },
     };

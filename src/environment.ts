@@ -89,7 +89,7 @@ function cloudTexture(random: () => number) {
     return texture;
 }
 
-export function createEnvironment(scene: THREE.Scene, startPhase = Math.PI / 3) {
+export function createEnvironment(scene: THREE.Scene, startPhase = Math.PI / 3, startDay = 0) {
     let seed = 9281;
     const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
 
@@ -154,8 +154,11 @@ export function createEnvironment(scene: THREE.Scene, startPhase = Math.PI / 3) 
 
     const sunDir = skyUniforms.uSunDir.value, moonDir = skyUniforms.uMoonDir.value;
     let phase = startPhase; // default is mid-morning
+    // Days count up at sunrise, when the phase wraps back to 0.
+    let day = startDay;
     const update = (dt: number, camera?: THREE.Camera) => {
-        phase = (phase + dt * Math.PI * 2 / DAY_LENGTH) % (Math.PI * 2);
+        phase += dt * Math.PI * 2 / DAY_LENGTH;
+        if (phase >= Math.PI * 2) { day += Math.floor(phase / (Math.PI * 2)); phase %= Math.PI * 2; }
         sunDir.set(Math.cos(phase), Math.sin(phase), .25).normalize();
         moonDir.copy(sunDir).negate();
         const e = sunDir.y;
@@ -194,7 +197,11 @@ export function createEnvironment(scene: THREE.Scene, startPhase = Math.PI / 3) 
     return {
         update,
         night: () => sunDir.y < 0,
+        daylight: () => smoothstep(-.12, .2, sunDir.y),
         phase: () => phase,
+        day: () => day,
+        // Sleeping: jump to just after the next sunrise.
+        skipToMorning() { phase = Math.PI * 2 + .05; update(0); },
         dispose() {
             scene.remove(sky, stars, clouds, sunLight, moonLight, hemiLight);
             sky.geometry.dispose(); skyMaterial.dispose();

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Player } from './player.ts';
-import { SIZE, type Vec3, type World } from './world.ts';
+import { BIOME_SIZE, SAND, SIZE_X, SIZE_Y, SIZE_Z, SNOW, biomeOrigin, type Biome, type Vec3, type World } from './world.ts';
 
 export const ZOMBIE_HEALTH = 6;
 export type ZombieSave = { spawned: boolean; health: number; position: Vec3 | null; state: string; timer: number; knockX: number; knockZ: number };
@@ -9,7 +9,7 @@ const REST_ARMS = -Math.PI / 2, RAISED_ARMS = -2.4, SLAMMED_ARMS = -.6;
 
 // Feet cell with solid ground below and room for a 1.8-tall body.
 const standable = (world: World, x: number, y: number, z: number) =>
-    y > 0 && !!world.get(x, y - 1, z) && !world.get(x, y, z) && !world.get(x, y + 1, z);
+    y > 0 && world.blocking(x, y - 1, z) && !world.blocking(x, y, z) && !world.blocking(x, y + 1, z);
 
 function groundCell(world: World, p: Vec3) {
     const x = Math.floor(p.x), z = Math.floor(p.z);
@@ -20,26 +20,26 @@ function groundCell(world: World, p: Vec3) {
 // Where a walker ends up stepping from (x, y, z) into column (nx, nz): same level, one block up, or a drop of up to three.
 function stepInto(world: World, x: number, y: number, z: number, nx: number, nz: number) {
     if (standable(world, nx, y, nz)) return y;
-    if (world.get(nx, y, nz)) return standable(world, nx, y + 1, nz) && !world.get(x, y + 2, z) ? y + 1 : null;
-    if (world.get(nx, y + 1, nz)) return null;
+    if (world.blocking(nx, y, nz)) return standable(world, nx, y + 1, nz) && !world.blocking(x, y + 2, z) ? y + 1 : null;
+    if (world.blocking(nx, y + 1, nz)) return null;
     for (let ny = y - 1; ny >= y - 3; ny--) if (standable(world, nx, ny, nz)) return ny;
     return null;
 }
 
-// ponytail: BFS over the whole 32³ world is instant; switch to A* if the world grows.
+// ponytail: BFS over the whole 96×32×64 world stays fast even for six zombies; switch to A* if the world grows.
 export function findPath(world: World, from: Vec3, to: Vec3): Vec3[] | null {
     const start = groundCell(world, from), goal = groundCell(world, to);
     if (!start || !goal) return null;
-    const key = (x: number, y: number, z: number) => x + SIZE * (z + SIZE * y);
-    const parent = new Int32Array(SIZE ** 3).fill(-1);
+    const key = (x: number, y: number, z: number) => x + SIZE_X * (z + SIZE_Z * y);
+    const parent = new Int32Array(SIZE_X * SIZE_Y * SIZE_Z).fill(-1);
     const startKey = key(start.x, start.y, start.z), goalKey = key(goal.x, goal.y, goal.z);
     parent[startKey] = startKey;
     const queue = [startKey];
     for (let i = 0; i < queue.length && parent[goalKey] < 0; i++) {
-        const k = queue[i], x = k % SIZE, z = Math.floor(k / SIZE) % SIZE, y = Math.floor(k / SIZE ** 2);
+        const k = queue[i], x = k % SIZE_X, z = Math.floor(k / SIZE_X) % SIZE_Z, y = Math.floor(k / (SIZE_X * SIZE_Z));
         for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
             const nx = x + dx, nz = z + dz;
-            if (nx < 0 || nz < 0 || nx >= SIZE || nz >= SIZE) continue;
+            if (nx < 0 || nz < 0 || nx >= SIZE_X || nz >= SIZE_Z) continue;
             const ny = stepInto(world, x, y, z, nx, nz);
             if (ny === null || parent[key(nx, ny, nz)] >= 0) continue;
             parent[key(nx, ny, nz)] = k;
@@ -49,7 +49,7 @@ export function findPath(world: World, from: Vec3, to: Vec3): Vec3[] | null {
     if (parent[goalKey] < 0) return null;
     const path: Vec3[] = [];
     for (let k = goalKey; k !== startKey; k = parent[k])
-        path.unshift({ x: k % SIZE + .5, y: Math.floor(k / SIZE ** 2), z: Math.floor(k / SIZE) % SIZE + .5 });
+        path.unshift({ x: k % SIZE_X + .5, y: Math.floor(k / (SIZE_X * SIZE_Z)), z: Math.floor(k / SIZE_X) % SIZE_Z + .5 });
     return path;
 }
 
@@ -57,12 +57,23 @@ type State = 'gone' | 'wander' | 'chase' | 'windup' | 'strike' | 'recover' | 'st
 // Longest a restored timer may run in each live state.
 const TIMERS: Record<string, number> = { wander: 4, chase: 0, windup: WINDUP, strike: STRIKE, recover: RECOVER, stagger: STAGGER };
 
-export function createZombie(world: World) {
+// Skin, shade, mouth, teeth, shirt, torn, pants, patch, shoes: one outfit per biome.
+const THEMES: Record<Biome, { name: string; colors: string[] }> = {
+    plains: { name: 'Zombie', colors: ['#3c5566', '#2a3d4a', '#2a1414', '#d9cfae', '#5b5148', '#3a332d', '#1f2a44', '#5d6a2e', '#16181f'] },
+    snow: { name: 'Frost zombie', colors: ['#a9c8dc', '#7fa3bb', '#2a2a3a', '#f4f8fb', '#e8eef2', '#b6c6d1', '#5b7c99', '#ffffff', '#3b4a5a'] },
+    desert: { name: 'Husk', colors: ['#a8905f', '#7d6a45', '#3a2414', '#e8dcb5', '#d8c79a', '#b7a473', '#8b7447', '#efe3bd', '#4a3a24'] },
+    ocean: { name: 'Drowned', colors: ['#3d8a86', '#2b6663', '#10302e', '#cfe5d8', '#2f5f73', '#244a5a', '#1e3d4d', '#4f8f3a', '#16262b'] },
+    forest: { name: 'Mossy zombie', colors: ['#5b7a4a', '#415a35', '#2a1a10', '#d9cfae', '#3f6b2f', '#2e4f22', '#4a3b28', '#7cb05a', '#1f1a12'] },
+    mountain: { name: 'Miner zombie', colors: ['#7d8388', '#5c6166', '#2a1a1a', '#d9d4c7', '#6b4a2e', '#4d3521', '#3d3a38', '#9a9a92', '#221f1c'] },
+};
+
+export function createZombie(world: World, biome: Biome = 'plains') {
     const root = new THREE.Group();
-    root.name = 'Zombie';
+    root.name = THEMES[biome].name;
+    root.userData.biome = biome;
     root.visible = false;
     const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const colors = ['#3c5566', '#2a3d4a', '#2a1414', '#d9cfae', '#5b5148', '#3a332d', '#1f2a44', '#5d6a2e', '#16181f'];
+    const colors = THEMES[biome].colors;
     const materials = [...colors.map(color => new THREE.MeshLambertMaterial({ color })), new THREE.MeshBasicMaterial({ color: '#ff2a1a' })];
     const SKIN = 0, SHADE = 1, MOUTH = 2, TEETH = 3, SHIRT = 4, TORN = 5, PANTS = 6, PATCH = 7, SHOES = 8, EYE = 9;
     function box(parent: THREE.Object3D, material: number, x: number, y: number, z: number, w: number, h: number, d: number) {
@@ -115,11 +126,13 @@ export function createZombie(world: World) {
         root.position.set(p.x, p.y, p.z);
     }
     function spawn(target: Vec3) {
+        // Each zombie keeps to its own biome's tile when it spawns.
+        const origin = biomeOrigin(biome);
         for (let tries = 0; tries < 200; tries++) {
-            const x = Math.floor(Math.random() * SIZE), z = Math.floor(Math.random() * SIZE);
-            let y = SIZE - 1;
-            while (y > 0 && !world.get(x, y, z)) y--;
-            if (![1, 2, 3].includes(world.get(x, y, z)) || !standable(world, x, y + 1, z) || Math.hypot(x + .5 - target.x, z + .5 - target.z) < 12) continue;
+            const x = origin.x + Math.floor(Math.random() * BIOME_SIZE), z = origin.z + Math.floor(Math.random() * BIOME_SIZE);
+            let y = SIZE_Y - 1;
+            while (y > 0 && !world.solid(x, y, z)) y--;
+            if (![1, 2, 3, SAND, SNOW].includes(world.get(x, y, z)) || !standable(world, x, y + 1, z) || Math.hypot(x + .5 - target.x, z + .5 - target.z) < 12) continue;
             place({ x: x + .5, y: y + 1, z: z + .5 }, ZOMBIE_HEALTH);
             return;
         }
