@@ -294,18 +294,20 @@ test('friendly animals spawn clear, wander within terrain, recover after edits, 
     wildlife.update(1 / 30);
     assert.equal(bird.position.y, animalGround(world, bird.position.x, bird.position.z, .56, 1.3));
     const chickenMesh = bird.children.find(child => child instanceof Mesh)!;
-    assert.deepEqual(wildlife.damage(chickenMesh), { dead: false, drops: [] });
-    assert.deepEqual(wildlife.damage(chickenMesh), { dead: false, drops: [] });
-    const loot = wildlife.damage(chickenMesh);
+    // Four punches for a chicken.
+    for (let i = 0; i < 3; i++) assert.deepEqual(wildlife.damage(chickenMesh, 5), { dead: false, drops: [] });
+    const loot = wildlife.damage(chickenMesh, 5);
     assert.equal(loot?.dead, true);
     assert.deepEqual(loot?.drops.map(stack => stack.id), [FEATHER, CHICKEN_MEAT]);
-    assert.ok(loot?.drops.every(stack => stack.count >= 1 && stack.count <= 2));
+    assert.ok(loot?.drops.every(stack => stack.count === 1));
     assert.equal(bird.visible, false);
     assert.equal(wildlife.damage(wildlife.group.children[7]), null);
     // Sheep give wool and mutton.
     const lamb = animals[12], lambMesh = lamb.children.find(child => child instanceof Mesh)!;
-    wildlife.damage(lambMesh); wildlife.damage(lambMesh);
-    assert.deepEqual(wildlife.damage(lambMesh)?.drops.map(stack => stack.id), [WOOL, MUTTON]);
+    // Three sword slashes for a sheep.
+    assert.deepEqual(wildlife.damage(lambMesh, 9), { dead: false, drops: [] });
+    assert.deepEqual(wildlife.damage(lambMesh, 9), { dead: false, drops: [] });
+    assert.deepEqual(wildlife.damage(lambMesh, 9)?.drops.map(stack => stack.id), [WOOL, MUTTON]);
     // Dawn brings everyone back, healed, including the defeated.
     wildlife.respawn();
     assert.ok(animals.every(animal => animal.visible));
@@ -360,8 +362,8 @@ test('sword, eating, zombie pathfinding, night spawning, fighting, and losing in
     assert.equal(craft(pack, 'sword', []), false);
     assert.equal(craft(pack, 'sword', [TABLE]), true);
     const sword = pack.slots.findIndex(stack => stack?.id === SWORD);
-    assert.equal(attackDamage(pack, sword), 3);
-    assert.equal(attackDamage(pack, sword + 1), 1);
+    assert.equal(attackDamage(pack, sword), 9);
+    assert.equal(attackDamage(pack, sword + 1), 5);
     wear(pack, sword);
     assert.equal(pack.slots[sword]?.durability, TOOL_USES - 1);
     assert.deepEqual(eat(pack, 3), { food: 0, health: 3 });
@@ -417,11 +419,11 @@ test('sword, eating, zombie pathfinding, night spawning, fighting, and losing in
     }
     assert.equal(damage, 1);
     assert.ok(sawWindup);
-    // Two sword blows put it down; it stays gone for the rest of the night.
-    assert.equal(zombie.hit(3), false);
+    // Six sword blows put it down; it stays gone for the rest of the night.
+    for (let i = 0; i < 5; i++) assert.equal(zombie.hit(9), false);
     assert.equal(zombie.state, 'stagger');
-    assert.equal(zombie.hit(3), true);
-    assert.equal(zombie.hit(3), null);
+    assert.equal(zombie.hit(9), true);
+    assert.equal(zombie.hit(9), null);
     run(2);
     assert.equal(zombie.root.visible, false);
     run(1 / 120, false);
@@ -509,7 +511,7 @@ test('session saves, validates untrusted data, migrates v2 saves, and clears', (
     store.set('minecaves-session-v4', JSON.stringify({ ...data, health: 99, selected: 12,
         slots: [{ id: SWORD, count: 2 }, { id: 999, count: 1 }, { id: 4, count: 65 }, { id: OPEN_DOOR, count: 1 }, { id: 3, count: 5, durability: 9 }, 'x'],
         drops: [{ id: 3, count: 1, x: 'a' }, { id: 3, count: 1, durability: 0, x: 5, y: 5, z: 5, age: 1e9 }],
-        position: { x: 'a' }, zombies: [{ spawned: 'yes', health: 50, position: { x: 1 }, state: 7, timer: 'soon' }] }));
+        position: { x: 'a' }, zombies: [{ spawned: 'yes', health: 999, position: { x: 1 }, state: 7, timer: 'soon' }] }));
     const repaired = loadSession(storage)!;
     assert.equal(repaired.health, 3);
     assert.equal(repaired.selected, 0);

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Player } from './player.ts';
 import { BIOME_SIZE, SAND, SIZE_X, SIZE_Y, SIZE_Z, SNOW, biomeOrigin, type Biome, type Vec3, type World } from './world.ts';
 
-export const ZOMBIE_HEALTH = 6;
+export const ZOMBIE_HEALTH = 50;
 export type ZombieSave = { spawned: boolean; health: number; position: Vec3 | null; state: string; timer: number; knockX: number; knockZ: number };
 const SIGHT = 10, GIVE_UP = 16, LOST_SECONDS = 4, WINDUP = .45, STRIKE = .2, RECOVER = .9, STAGGER = .25;
 const REST_ARMS = -Math.PI / 2, RAISED_ARMS = -2.4, SLAMMED_ARMS = -.6;

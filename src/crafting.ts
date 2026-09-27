@@ -12,7 +12,7 @@ export const FOODS = new Map([[COOKED_CHICKEN, 3], [COOKED_MUTTON, 3], [CHICKEN_
 // Blocks that unlock recipes when placed nearby.
 export const STATIONS = [TABLE, STOVE, SMELTER];
 export const TOOLS = [PICKAXE, AXE, SWORD];
-export const TOOL_USES = 32, MAX_STACK = 64;
+export const TOOL_USES = 60, MAX_STACK = 64;
 // Slots 0–9 are the hotbar, 10–45 the 6×6 pack. A chest holds 6×3.
 export const HOTBAR_SLOTS = 10, SLOTS = 46, CHEST_SLOTS = 18;
 export const MAX_HEALTH = 10, START_HEALTH = 3;
@@ -117,10 +117,10 @@ export function stationsNearby(world: World, player: Vec3) {
 }
 export function miningSeconds(inventory: Inventory, slot: number, block: number) {
     const tool = held(inventory, slot);
-    if (block === 3 || block === STOVE || block === SMELTER) return tool === PICKAXE ? .55 : null;
-    if ([4, PLANKS, TABLE, CHEST, DOOR, OPEN_DOOR, BED, BED_HEAD].includes(block)) return tool === AXE ? .25 : 1.2;
-    if (block === WINDOW) return .3;
-    return block === 5 ? .15 : .35;
+    if (block === 3 || block === STOVE || block === SMELTER) return tool === PICKAXE ? 1.2 : null;
+    if ([4, PLANKS, TABLE, CHEST, DOOR, OPEN_DOOR, BED, BED_HEAD].includes(block)) return tool === AXE ? .7 : 2.5;
+    if (block === WINDOW) return .5;
+    return block === 5 ? .3 : .6;
 }
 // The other cell of a two-cell door or bed, if it's still there.
 export function partner(world: World, x: number, y: number, z: number): Vec3 | null {
@@ -159,8 +159,9 @@ export function wear(inventory: Inventory, slot: number) {
     if (!stack || !TOOLS.includes(stack.id)) return;
     if (--stack.durability <= 0) inventory.slots[slot] = null;
 }
+// Hand 5, sword 9. Zombie 50 HP = 10 punches / 6 slashes, sheep 27 = 6 / 3, chicken 18 = 4 / 2.
 export function attackDamage(inventory: Inventory, slot: number) {
-    return held(inventory, slot) === SWORD ? 3 : 1;
+    return held(inventory, slot) === SWORD ? 9 : 5;
 }
 // Eats the held food, or else the best food in the pack. Returns the food eaten (0 for none) and the new health.
 export function eat(inventory: Inventory, health: number, slot = -1) {

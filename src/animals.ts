@@ -14,9 +14,11 @@ const SPECS: { kind: string; biome: Biome; radius: number; height: number; speed
 ];
 // What each huntable animal drops: [item, fewest, most]. Everything else is friendly and can't be hurt.
 const LOOT: Record<string, [number, number, number][]> = {
-    chicken: [[FEATHER, 1, 2], [CHICKEN_MEAT, 1, 2]],
-    sheep: [[WOOL, 1, 2], [MUTTON, 1, 2]],
+    chicken: [[FEATHER, 1, 1], [CHICKEN_MEAT, 1, 1]],
+    sheep: [[WOOL, 1, 1], [MUTTON, 1, 1]],
 };
+// Hit points of each huntable animal; see attackDamage for hits per weapon.
+const HEALTH: Record<string, number> = { chicken: 18, sheep: 27 };
 // Fish cruise one block under the surface.
 const FISH_Y = SEA_LEVEL - .6;
 
@@ -220,7 +222,7 @@ export function createAnimals(world: World) {
         root.rotation.y = i * 1.6 + 1;
         Object.assign(root.userData, { animal: spec.kind, radius: spec.radius, height: spec.height });
         group.add(root);
-        return { root, spec, part, sx, sz, timer: .6 + i * .3, turns: i, idle: false, health: LOOT[spec.kind] ? 3 : Infinity };
+        return { root, spec, part, sx, sz, timer: .6 + i * .3, turns: i, idle: false, health: HEALTH[spec.kind] ?? Infinity };
     });
     let time = 0;
     return {
@@ -302,7 +304,7 @@ export function createAnimals(world: World) {
         // Dawn: everyone comes back to their starting spot, healed; defeated animals return too.
         respawn() {
             animals.forEach(animal => {
-                animal.health = LOOT[animal.spec.kind] ? 3 : Infinity;
+                animal.health = HEALTH[animal.spec.kind] ?? Infinity;
                 settle(animal.root, animal.spec, animal.sx, animal.sz);
             });
         },
