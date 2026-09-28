@@ -1,11 +1,10 @@
 import { BLOCKS, CHEST, RADIUS, SIZE_X, SIZE_Y, SIZE_Z, TREES, inside, type Vec3 } from './world.ts';
-import { CHEST_SLOTS, HOTBAR_SLOTS, ITEMS, MAX_HEALTH, NOT_ITEMS, SLOTS, START_HEALTH, TOOLS, TOOL_USES, addItem, createInventory, maxStack, type Stack } from './crafting.ts';
+import { CHEST_SLOTS, HOTBAR_SLOTS, ITEMS, MAX_HEALTH, NOT_ITEMS, SLOTS, START_HEALTH, TOOLS, maxStack, toolUses, type Stack } from './crafting.ts';
 import { DESPAWN, type DropSave } from './drops.ts';
 import { ZOMBIE_HEALTH, type ZombieSave } from './zombie.ts';
 
-const KEY = 'minecaves-session-v4', V3_KEY = 'minecaves-session-v3', V2_KEY = 'minecaves-session-v2';
-// v4 added eight blocks (stove to bed head), so v3 item IDs from sticks (13) up sit eight higher now.
-const V3_ITEM_SHIFT = 8, V3_FIRST_ITEM = 13;
+// v5 doubled the world's height for caves, so older saves don't fit and are left behind.
+const KEY = 'minecaves-session-v5', OLD_KEYS = ['minecaves-session-v4', 'minecaves-session-v3', 'minecaves-session-v2'];
 type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 export type Session = {
     world: Uint8Array; slots: (Stack | null)[]; health: number; selected: number; drops: DropSave[];
@@ -24,21 +23,17 @@ export function saveSession(session: Session, storage?: Store) {
 }
 
 export function clearSession(storage?: Store) {
-    // The old v2 save goes too, or a new world would migrate it straight back.
-    try { for (const key of [KEY, V3_KEY, V2_KEY]) (storage ?? localStorage).removeItem(key); } catch { /* nothing saved to clear */ }
+    // Old saves go too, to free their space.
+    try { for (const key of [KEY, ...OLD_KEYS]) (storage ?? localStorage).removeItem(key); } catch { /* nothing saved to clear */ }
 }
 
 // Saved data is untrusted: a broken world means no save; other fields fall back to defaults one by one.
 export function loadSession(storage?: Store): Session | null {
     try {
         const store = storage ?? localStorage;
-        const current = store.getItem(KEY);
-        const raw = current ?? store.getItem(V3_KEY) ?? store.getItem(V2_KEY);
+        const raw = store.getItem(KEY);
         if (!raw) return null;
         const data = JSON.parse(raw);
-        // Older saves: move their item IDs past the new blocks before anything reads them.
-        const shift = (id: unknown) => typeof id === 'number' && id >= V3_FIRST_ITEM ? id + V3_ITEM_SHIFT : id;
-        if (current === null) for (const list of [data.slots, data.drops]) if (Array.isArray(list)) list.forEach((value: any) => { if (value) value.id = shift(value.id); });
         const world = Uint8Array.from(atob(data.world), char => char.charCodeAt(0));
         if (world.length !== SIZE_X * SIZE_Y * SIZE_Z || world.some(id => id >= BLOCKS.length)) return null;
         const finite = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -52,15 +47,9 @@ export function loadSession(storage?: Store): Session | null {
         const itemId = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 1 && value < ITEMS.length && !NOT_ITEMS.includes(value);
         const stack = (value: any): Stack | null => {
             if (!itemId(value?.id) || !Number.isInteger(value.count) || value.count < 1 || value.count > maxStack(value.id)) return null;
-            return { id: value.id, count: value.count, durability: TOOLS.includes(value.id) ? clamp(whole(value.durability), 1, TOOL_USES) : 0 };
+            return { id: value.id, count: value.count, durability: TOOLS.includes(value.id) ? clamp(whole(value.durability), 1, toolUses(value.id)) : 0 };
         };
-        let slots: (Stack | null)[] = Array.from({ length: SLOTS }, (_, i) => stack(data.slots?.[i]));
-        if (!Array.isArray(data.slots) && Array.isArray(data.counts)) {
-            // A v2 save kept one count per item. Its item IDs from 11 up sit two higher now (cactus and ice came first).
-            const migrated = createInventory();
-            data.counts.forEach((count: unknown, i: number) => { const id = i < 11 ? i : shift(i + 2) as number; if (itemId(id) && whole(count)) addItem(migrated, id, whole(count)); });
-            slots = migrated.slots;
-        }
+        const slots: (Stack | null)[] = Array.from({ length: SLOTS }, (_, i) => stack(data.slots?.[i]));
         const drops: DropSave[] = (Array.isArray(data.drops) ? data.drops.slice(0, 500) : []).flatMap((value: any) => {
             const item = stack(value), at = position(value);
             return item && at ? [{ ...item, ...at, age: clamp(finite(value.age) ?? 0, 0, DESPAWN) }] : [];

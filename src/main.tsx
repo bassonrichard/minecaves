@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createGame } from './game';
-import { AXE, CHEST_SLOTS, HOTBAR_SLOTS, ITEMS, MAX_HEALTH, PICKAXE, RECIPES, SLOTS, START_HEALTH, STICKS, SWORD, TABLE, TOOLS, TOOL_USES, countOf, craftBlocker, createInventory, type Inventory, type Stack } from './crafting';
+import { AXE, CHEST_SLOTS, HOTBAR_SLOTS, ITEMS, MAX_HEALTH, PICKAXE, RECIPES, SLOTS, START_HEALTH, STICKS, STONE_AXE, STONE_PICKAXE, STONE_SWORD, STONE_TOOL_USES, SWORD, TABLE, TOOLS, TOOL_USES, countOf, craftBlocker, createInventory, toolUses, type Inventory, type Stack } from './crafting';
 import { itemArt } from './items';
 import './style.css';
 
@@ -28,7 +28,8 @@ function ItemIcon({ id, previews }: { id: number; previews: string[] }) {
     </svg>;
 }
 
-const shortName = (id: number) => id === PICKAXE ? 'Pickaxe' : id === AXE ? 'Axe' : id === SWORD ? 'Sword' : id === TABLE ? 'Table' : ITEMS[id];
+const SHORT: Record<number, string> = { [PICKAXE]: 'Pickaxe', [AXE]: 'Axe', [SWORD]: 'Sword', [TABLE]: 'Table', [STONE_PICKAXE]: 'Stone pick', [STONE_AXE]: 'Stone axe', [STONE_SWORD]: 'Stone sword' };
+const shortName = (id: number) => SHORT[id] ?? ITEMS[id];
 
 // One inventory slot: drag it onto another slot to move or merge, Alt+arrows to move by keyboard, Q to drop it.
 function Slot({ index, stack, previews, className = '', selected = false, number, onSelect, game }: {
@@ -55,7 +56,7 @@ function Slot({ index, stack, previews, className = '', selected = false, number
         }}>
         {number !== undefined && <span className="slot-number">{number}</span>}
         {stack && <><ItemIcon id={stack.id} previews={previews} />{stack.count > 1 && <span className="slot-count">{stack.count}</span>}<span className="slot-name">{shortName(stack.id)}</span></>}
-        {stack && TOOLS.includes(stack.id) && <meter className="durability" min={0} max={TOOL_USES} value={stack.durability} aria-label={`${ITEMS[stack.id]} durability`} />}
+        {stack && TOOLS.includes(stack.id) && <meter className="durability" min={0} max={toolUses(stack.id)} value={stack.durability} aria-label={`${ITEMS[stack.id]} durability`} />}
     </button>;
 }
 
@@ -107,7 +108,7 @@ function CraftingPanel({ inventory, near, chest, previews, onCraft, onClose, gam
                     <Slot key={i} index={i} stack={stack} previews={previews} className="pack-slot" number={(i + 1) % 10} game={game} />)}</div>
                 <div className="drop-zone" onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); game?.dropSlot(Number(event.dataTransfer.getData('text/plain'))); }}>
                     Drag here to drop on the ground</div>
-                <div className="crafting-tip"><strong>A little know-how</strong><p>Hold left click to gather: blocks pop out, and you pick them up by walking over them. When your pack is full, items wait on the ground. A pickaxe mines stone; an axe cuts wood faster. Each tool lasts {TOOL_USES} uses.</p><p>Zombies roam at night. A sword hits three times harder than your fist. Press F to eat: raw meat gives a heart, cooked gives three. Mind cacti and long falls.</p><p>Right-click a table, stove, smelter, or chest to use it, a door to open it, and a bed to sleep through the night. Q drops what you hold. If you die, your things stay where you fell, and you wake at your bed.</p></div>
+                <div className="crafting-tip"><strong>A little know-how</strong><p>Hold left click to gather: blocks pop out, and you pick them up by walking over them. When your pack is full, items wait on the ground. A pickaxe mines stone; an axe cuts wood faster. Wooden tools last {TOOL_USES} uses; stone ones last {STONE_TOOL_USES}, dig twice as fast, and hit harder.</p><p>Zombies roam at night. A sword hits almost twice as hard as your fist. Press F to eat: raw meat gives a heart, cooked gives three. Mind cacti and long falls.</p><p>Caves lie under every biome, and they're dark: craft torches (a stick and a plank make four) before you go down. Ice crystals freeze you, lava sets you alight (water puts it out), quicksand pulls you under (hold Space), and vines can be climbed. Watch for spiders and cave snakes.</p><p>Right-click a table, stove, smelter, or chest to use it, a door to open it, and a bed to sleep through the night. Q drops what you hold. If you die, your things stay where you fell, and you wake at your bed.</p></div>
                 <p className="session-note">Your world and pack are saved in this browser.</p>
             </section>
         </div>
@@ -122,6 +123,7 @@ function App() {
     const [crafting, setCrafting] = useState<{ open: boolean; near: number[]; chest: (Stack | null)[] | null }>({ open: false, near: [], chest: null });
     const [mining, setMining] = useState({ progress: 0, message: '' });
     const [health, setHealth] = useState(START_HEALTH), [hurt, setHurt] = useState({ count: 0, heart: -1 });
+    const [status, setStatus] = useState({ frost: 0, burning: false });
     useEffect(() => {
         try {
             game.current = createGame(host.current!, {
@@ -129,6 +131,7 @@ function App() {
                 crafting: (open, near, chest) => setCrafting({ open, near, chest }),
                 mining: (progress, message) => setMining({ progress, message }),
                 health: (value, wasHurt) => { setHealth(value); if (wasHurt) setHurt(previous => ({ count: previous.count + 1, heart: value })); },
+                status: (frost, burning) => setStatus({ frost, burning }),
             });
             setHasSave(game.current.hasSave);
         } catch (e) {
@@ -141,7 +144,7 @@ function App() {
     return <main className={locked ? 'app playing' : 'app'}>
         <div ref={host} className="world" aria-label="Interactive voxel world" />
         <header className="topbar"><a className="brand" href="./" aria-label="Minecaves home"><span className="brand-mark">▧</span>MINECAVES<span className="edition">SANDBOX / 002</span></a><span className="world-badge"><i /> A LITTLE WORLD OF YOUR OWN</span></header>
-        <div className="world-label"><span>THE OVERWORLD</span><small>96 × 64 · SIX BIOMES TO EXPLORE</small></div>
+        <div className="world-label"><span>THE OVERWORLD</span><small>96 × 64 · SIX BIOMES · SIX CAVES BELOW</small></div>
         {locked && <><div className="crosshair" aria-hidden="true">+</div><div className="mining-status">{mining.progress > 0 && <progress value={mining.progress} max={100} aria-label="Mining progress" />}{mining.message && <span role="status">{mining.message}</span>}</div></>}
         {!locked && !crafting.open && <section className="menu" aria-label={started ? 'Game paused' : 'Start game'}>
             <div className="eyebrow"><span /> YOUR NEXT SMALL ADVENTURE</div>
@@ -156,6 +159,9 @@ function App() {
             <div className="controls"><div><kbd>W</kbd><span className="key-row"><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><small>Wander</small></div><div><span className="mouse-icon">↕</span><small>Look around</small></div><div><kbd className="space">SPACE</kbd><small>Jump</small></div></div>
         </section>}
         {hurt.count > 0 && <div key={hurt.count} className="hurt" aria-hidden="true" />}
+        {status.frost > 0 && <div className="frost" style={{ opacity: status.frost }} aria-hidden="true" />}
+        {status.burning && <div className="fire" aria-hidden="true" />}
+        {(status.frost >= 1 || status.burning) && <span className="visually-hidden" role="status">{status.burning ? 'You are on fire' : 'You are freezing'}</span>}
         {error && <div className="error" role="alert">{error}</div>}
         <aside className="hotbar-area" aria-label="Block and tool palette">
             <div className="hearts" role="img" aria-label={`Health: ${health} of ${MAX_HEALTH} hearts`}>

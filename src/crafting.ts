@@ -1,18 +1,23 @@
-import { BED, BED_HEAD, BLOCKS, CHEST, DOOR, ICE, OPEN_DOOR, SAND, SMELTER, STOVE, WATER, WINDOW, canPlace, editBlock, overlaps, type Vec3, type World } from './world.ts';
+import { BED, BED_HEAD, BLOCKS, CHEST, DOOR, DRIPSTONE, GLOW_CORAL, GLOW_MUSHROOM, ICE, ICE_CRYSTAL, LAVA, MOSSY_STONE, OPEN_DOOR, QUICKSAND, SAND, SANDSTONE, SMELTER, STOVE, TORCH, VINE, WALL_SIDES, WALL_TORCHES, WATER, WINDOW, canPlace, editBlock, overlaps, type Vec3, type World } from './world.ts';
 
 // Items follow the blocks, so their IDs start at BLOCKS.length.
 const FIRST_ITEM = BLOCKS.length;
 export const PLANKS = 6, TABLE = 7, STICKS = FIRST_ITEM, PICKAXE = FIRST_ITEM + 1, AXE = FIRST_ITEM + 2, FEATHER = FIRST_ITEM + 3, CHICKEN_MEAT = FIRST_ITEM + 4, SWORD = FIRST_ITEM + 5;
 export const WOOL = FIRST_ITEM + 6, MUTTON = FIRST_ITEM + 7, COOKED_CHICKEN = FIRST_ITEM + 8, COOKED_MUTTON = FIRST_ITEM + 9, GLASS = FIRST_ITEM + 10;
-export const ITEMS = [...BLOCKS, 'Sticks', 'Wooden pickaxe', 'Wooden axe', 'Feathers', 'Raw chicken', 'Wooden sword', 'Wool', 'Raw mutton', 'Cooked chicken', 'Cooked mutton', 'Glass'];
+export const STONE_PICKAXE = FIRST_ITEM + 11, STONE_AXE = FIRST_ITEM + 12, STONE_SWORD = FIRST_ITEM + 13;
+export const ITEMS = [...BLOCKS, 'Sticks', 'Wooden pickaxe', 'Wooden axe', 'Feathers', 'Raw chicken', 'Wooden sword', 'Wool', 'Raw mutton', 'Cooked chicken', 'Cooked mutton', 'Glass',
+    'Stone pickaxe', 'Stone axe', 'Stone sword'];
 // Block IDs that only exist in the world, never as something you carry.
-export const NOT_ITEMS = [WATER, OPEN_DOOR, BED_HEAD];
+export const NOT_ITEMS = [WATER, OPEN_DOOR, BED_HEAD, LAVA, QUICKSAND, ...WALL_TORCHES];
 // Hearts each food restores, best first.
 export const FOODS = new Map([[COOKED_CHICKEN, 3], [COOKED_MUTTON, 3], [CHICKEN_MEAT, 1], [MUTTON, 1]]);
 // Blocks that unlock recipes when placed nearby.
 export const STATIONS = [TABLE, STOVE, SMELTER];
-export const TOOLS = [PICKAXE, AXE, SWORD];
-export const TOOL_USES = 60, MAX_STACK = 64;
+export const PICKAXES = [PICKAXE, STONE_PICKAXE], AXES = [AXE, STONE_AXE], SWORDS = [SWORD, STONE_SWORD];
+export const TOOLS = [...PICKAXES, ...AXES, ...SWORDS];
+// Stone tools last longer than wooden ones.
+export const TOOL_USES = 60, STONE_TOOL_USES = 150, MAX_STACK = 64;
+export const toolUses = (id: number) => [STONE_PICKAXE, STONE_AXE, STONE_SWORD].includes(id) ? STONE_TOOL_USES : TOOL_USES;
 // Slots 0–9 are the hotbar, 10–45 the 6×6 pack. A chest holds 6×3.
 export const HOTBAR_SLOTS = 10, SLOTS = 46, CHEST_SLOTS = 18;
 export const MAX_HEALTH = 10, START_HEALTH = 3;
@@ -24,6 +29,10 @@ export const RECIPES = [
     { id: 'pickaxe', output: PICKAXE, count: 1, ingredients: [[PLANKS, 3], [STICKS, 2]], station: TABLE },
     { id: 'axe', output: AXE, count: 1, ingredients: [[PLANKS, 3], [STICKS, 2]], station: TABLE },
     { id: 'sword', output: SWORD, count: 1, ingredients: [[PLANKS, 2], [STICKS, 1]], station: TABLE },
+    { id: 'torch', output: TORCH, count: 4, ingredients: [[STICKS, 1], [PLANKS, 1]], station: 0 },
+    { id: 'stone-pickaxe', output: STONE_PICKAXE, count: 1, ingredients: [[3, 3], [STICKS, 2]], station: TABLE },
+    { id: 'stone-axe', output: STONE_AXE, count: 1, ingredients: [[3, 3], [STICKS, 2]], station: TABLE },
+    { id: 'stone-sword', output: STONE_SWORD, count: 1, ingredients: [[3, 2], [STICKS, 1]], station: TABLE },
     { id: 'stove', output: STOVE, count: 1, ingredients: [[3, 6], [PLANKS, 2]], station: TABLE },
     { id: 'smelter', output: SMELTER, count: 1, ingredients: [[3, 8]], station: TABLE },
     { id: 'chest', output: CHEST, count: 1, ingredients: [[PLANKS, 8]], station: TABLE },
@@ -45,7 +54,7 @@ export const held = (inventory: Inventory, slot: number) => inventory.slots[slot
 export const countOf = (inventory: Inventory, id: number) => inventory.slots.reduce((n, stack) => n + (stack?.id === id ? stack.count : 0), 0);
 export const hasRoom = (inventory: Inventory, id: number) => inventory.slots.some(stack => !stack || (stack.id === id && stack.count < maxStack(id)));
 // Tops up matching stacks first, then fills the first empty slot (hotbar before pack). Returns what didn't fit.
-export function addItem(inventory: Inventory, id: number, count: number, durability = TOOLS.includes(id) ? TOOL_USES : 0) {
+export function addItem(inventory: Inventory, id: number, count: number, durability = TOOLS.includes(id) ? toolUses(id) : 0) {
     const limit = maxStack(id);
     for (const stack of inventory.slots) {
         if (!count) break;
@@ -115,10 +124,15 @@ export function stationsNearby(world: World, player: Vec3) {
             }
     return STATIONS.filter(id => near.has(id));
 }
+// Stone-hard blocks need a pickaxe.
+export const ROCK = [3, STOVE, SMELTER, SANDSTONE, MOSSY_STONE, ICE_CRYSTAL, DRIPSTONE];
+// Seconds to break a block with what's in the slot, or null when it can't be broken that way. Stone tools are faster.
 export function miningSeconds(inventory: Inventory, slot: number, block: number) {
     const tool = held(inventory, slot);
-    if (block === 3 || block === STOVE || block === SMELTER) return tool === PICKAXE ? 1.2 : null;
-    if ([4, PLANKS, TABLE, CHEST, DOOR, OPEN_DOOR, BED, BED_HEAD].includes(block)) return tool === AXE ? .7 : 2.5;
+    if (block === LAVA) return null;
+    if (ROCK.includes(block)) return tool === STONE_PICKAXE ? .6 : tool === PICKAXE ? 1.2 : null;
+    if ([4, PLANKS, TABLE, CHEST, DOOR, OPEN_DOOR, BED, BED_HEAD].includes(block)) return tool === STONE_AXE ? .45 : tool === AXE ? .7 : 2.5;
+    if ([VINE, TORCH, ...WALL_TORCHES, GLOW_MUSHROOM, GLOW_CORAL].includes(block)) return .2;
     if (block === WINDOW) return .5;
     return block === 5 ? .3 : .6;
 }
@@ -141,8 +155,8 @@ export function harvest(world: World, player: Vec3, inventory: Inventory, slot: 
     if (block === ICE ? y === 0 || !world.set(x, y, z, WATER) : !editBlock(world, player, x, y, z, 0)) return null;
     // Doors and beds come away whole.
     if (other) world.set(other.x, other.y, other.z, 0);
-    if (tool === PICKAXE || tool === AXE) wear(inventory, slot);
-    return block === ICE ? 0 : block === OPEN_DOOR ? DOOR : block === BED_HEAD ? BED : block;
+    if (PICKAXES.includes(tool) || AXES.includes(tool)) wear(inventory, slot);
+    return block === ICE ? 0 : block === OPEN_DOOR ? DOOR : block === BED_HEAD ? BED : block === QUICKSAND ? SAND : WALL_TORCHES.includes(block) ? TORCH : block;
 }
 // Swings both halves of a door. It won't shut on the player. Returns whether it moved.
 export function toggleDoor(world: World, player: Vec3, x: number, y: number, z: number) {
@@ -159,9 +173,10 @@ export function wear(inventory: Inventory, slot: number) {
     if (!stack || !TOOLS.includes(stack.id)) return;
     if (--stack.durability <= 0) inventory.slots[slot] = null;
 }
-// Hand 5, sword 9. Zombie 50 HP = 10 punches / 6 slashes, sheep 27 = 6 / 3, chicken 18 = 4 / 2.
+// Hand 5, sword 9, stone sword 13. Zombie 50 HP = 10 punches / 6 slashes / 4 stone slashes; sheep 27 = 6 / 3 / 3; chicken 18 = 4 / 2 / 2.
 export function attackDamage(inventory: Inventory, slot: number) {
-    return held(inventory, slot) === SWORD ? 9 : 5;
+    const weapon = held(inventory, slot);
+    return weapon === STONE_SWORD ? 13 : weapon === SWORD ? 9 : 5;
 }
 // Eats the held food, or else the best food in the pack. Returns the food eaten (0 for none) and the new health.
 export function eat(inventory: Inventory, health: number, slot = -1) {
@@ -173,10 +188,14 @@ export function eat(inventory: Inventory, health: number, slot = -1) {
     return { food, health: Math.min(MAX_HEALTH, health + FOODS.get(food)!) };
 }
 // Places the held block. Doors take the cell above too; beds reach one cell further along `facing` ([dx, dz]).
-export function place(world: World, player: Vec3, inventory: Inventory, slot: number, x: number, y: number, z: number, facing: [number, number] = [0, 1]) {
+// `against` is the normal of the face clicked: a torch stands in the middle of a top face and fixes to the side of a wall.
+export function place(world: World, player: Vec3, inventory: Inventory, slot: number, x: number, y: number, z: number, facing: [number, number] = [0, 1], against: [number, number, number] = [0, 1, 0]) {
     const stack = inventory.slots[slot];
     if (!stack || stack.id < 1 || stack.id >= BLOCKS.length || NOT_ITEMS.includes(stack.id)) return false;
-    if (stack.id === DOOR) {
+    if (stack.id === TORCH) {
+        const [nx, ny, nz] = against, side = WALL_SIDES.findIndex(([dx, dz]) => dx === -nx && dz === -nz);
+        if (ny < 0 || (!ny && side < 0) || !editBlock(world, player, x, y, z, ny ? TORCH : WALL_TORCHES[side])) return false;
+    } else if (stack.id === DOOR) {
         if (!canPlace(world, player, x, y + 1, z) || !editBlock(world, player, x, y, z, DOOR)) return false;
         world.set(x, y + 1, z, DOOR);
     } else if (stack.id === BED) {

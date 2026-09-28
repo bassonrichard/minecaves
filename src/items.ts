@@ -1,11 +1,14 @@
 import * as THREE from 'three';
-import { AXE, CHICKEN_MEAT, COOKED_CHICKEN, COOKED_MUTTON, FEATHER, GLASS, MUTTON, PICKAXE, STICKS, SWORD, WOOL } from './crafting.ts';
+import { AXE, CHICKEN_MEAT, COOKED_CHICKEN, COOKED_MUTTON, FEATHER, GLASS, MUTTON, PICKAXE, STICKS, STONE_AXE, STONE_PICKAXE, STONE_SWORD, SWORD, WOOL } from './crafting.ts';
 import { FACES } from './world.ts';
 
 // 16×16 pixel art for non-block items, painted from simple shapes and outlined automatically.
 // The same pixels draw the UI icon and extrude into the held/dropped 3D model.
 type Art = (string | null)[][];
 const WOOD = '#8a5a2b', LIGHT_WOOD = '#c49254', PLANK = '#d2ab6d', PLANK_SHADE = '#a57b45';
+// Tool heads: [colour, shade, edge highlight]. Stone tools share the wooden shapes.
+type Head = [string, string, string];
+const PLANK_HEAD: Head = [PLANK, PLANK_SHADE, '#e6c68c'], STONE_HEAD: Head = ['#9d9c95', '#6f6e69', '#cfcec6'];
 
 function paint(draw: (fill: (color: string, inside: (x: number, y: number) => boolean) => void) => void, outline = '#2b1d12'): Art {
     const art: Art = Array.from({ length: 16 }, () => Array(16).fill(null));
@@ -33,27 +36,40 @@ const handle = (bx: number, by: number) => (fill: (c: string, f: (x: number, y: 
     fill(LIGHT_WOOD, line(3.5, 12.5, bx + .5, by - .5, .8));
 };
 
-const ART: Record<number, Art> = {
-    [STICKS]: paint(fill => handle(12.5, 3.5)(fill)),
-    [PICKAXE]: paint(fill => {
+function pickaxe([color, shade]: Head) {
+    return paint(fill => {
         handle(10, 6)(fill);
         // A curved head: a band around the handle's base, capped to the upper right.
         const band = (lo: number, hi: number) => (x: number, y: number) => { const r = Math.hypot(x - 3, y - 13); return r >= lo && r <= hi && x - 3 > -.5 && 13 - y > -.5; };
-        fill(PLANK, band(9.3, 11.6));
-        fill(PLANK_SHADE, band(9.3, 10));
-    }),
-    [AXE]: paint(fill => {
+        fill(color, band(9.3, 11.6));
+        fill(shade, band(9.3, 10));
+    });
+}
+function axe([color, shade]: Head) {
+    return paint(fill => {
         handle(11.5, 4.5)(fill);
         const blade = segment(7.5, 2.5, 10.5, 5.5);
-        fill(PLANK, (x, y) => blade(x, y) <= 2.3 && x + y <= 14.5);
-        fill(PLANK_SHADE, (x, y) => blade(x, y) <= 2.3 && x + y <= 14.5 && x + y > 13);
-    }),
-    [SWORD]: paint(fill => {
-        fill(PLANK, line(6, 10, 13, 3, 2.6));
-        fill('#e6c68c', line(6.5, 9.5, 12.5, 3.5, .7));
+        fill(color, (x, y) => blade(x, y) <= 2.3 && x + y <= 14.5);
+        fill(shade, (x, y) => blade(x, y) <= 2.3 && x + y <= 14.5 && x + y > 13);
+    });
+}
+function sword([color, , edge]: Head) {
+    return paint(fill => {
+        fill(color, line(6, 10, 13, 3, 2.6));
+        fill(edge, line(6.5, 9.5, 12.5, 3.5, .7));
         fill(WOOD, line(3.5, 8.5, 7.5, 12.5, 1.8));
         fill(LIGHT_WOOD, line(2.5, 13.5, 5.5, 10.5, 1.6));
-    }),
+    });
+}
+
+const ART: Record<number, Art> = {
+    [STICKS]: paint(fill => handle(12.5, 3.5)(fill)),
+    [PICKAXE]: pickaxe(PLANK_HEAD),
+    [STONE_PICKAXE]: pickaxe(STONE_HEAD),
+    [AXE]: axe(PLANK_HEAD),
+    [STONE_AXE]: axe(STONE_HEAD),
+    [SWORD]: sword(PLANK_HEAD),
+    [STONE_SWORD]: sword(STONE_HEAD),
     [FEATHER]: paint(fill => {
         const vane = segment(5, 11, 11.5, 3);
         fill('#f4f1e8', (x, y) => vane(x, y) <= 2.2);

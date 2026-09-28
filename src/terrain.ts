@@ -1,8 +1,10 @@
 import * as THREE from 'three';
-import { BED, BED_HEAD, BED_HEIGHT, BLOCKS, CACTUS, CHEST, DOOR, FACES, ICE, OPEN_DOOR, SAND, SHAPED, SIZE_X, SIZE_Y, SIZE_Z, SMELTER, SNOW, STOVE, WATER, WINDOW, visibleFaces, type World } from './world.ts';
+import { BED, BED_HEAD, BED_HEIGHT, BLOCKS, BRIGHTNESS, LIGHT, CACTUS, CHEST, DOOR, DRIPSTONE, FACES, GLOW_CORAL, GLOW_MUSHROOM, GROUND, ICE, IS_SHAPED, LAVA, OPEN_DOOR, SAND, SIZE_X, SIZE_Y, SIZE_Z, SMELTER, SNOW, STOVE, TORCH, VINE, WALL_SIDES, WALL_TORCHES, WATER, WINDOW, biomeAt, visibleFaces, type Biome, type Light, type World } from './world.ts';
 // Tiles 17+: stove top/front, smelter front/top, chest side/top, window, door bottom/top, bed foot/head/side.
+// Tiles 29+: lava, ice crystal, quicksand, vine, glow mushroom, torch, sandstone, mossy stone, glow coral, dripstone, then coral tips, torch stick, flame.
 const palettes = ['#78a442', '#896044', '#92918a', '#805431', '#507f3b', '#6b943b', '#ad8350', '#b58a51', '#ac7e43', '#885d33', '#dcc68a', '#eef4f7', '#896044', '#3f76c9', '#4f8a3a', '#6aa24a', '#a9d4f2',
-    '#2d2f33', '#cfcac0', '#7f7e78', '#7f7e78', '#a8763c', '#a8763c', '#8a5a2b', '#9a6a38', '#9a6a38', '#b8323a', '#b8323a', '#b8323a'];
+    '#2d2f33', '#cfcac0', '#7f7e78', '#7f7e78', '#a8763c', '#a8763c', '#8a5a2b', '#9a6a38', '#9a6a38', '#b8323a', '#b8323a', '#b8323a',
+    '#e0601a', '#bfe8ff', '#d4bf86', '#3f7a2e', '#e9e0cc', '#6b4a2a', '#d9c088', '#7f7e78', '#e86fa8', '#9a8f80', '#ffc2e2', '#6b4a2a', '#ffb52e'];
 export function makeAtlas() {
     const canvas = document.createElement('canvas');
     canvas.width = 16 * palettes.length;
@@ -123,6 +125,45 @@ export function makeAtlas() {
             if (tile === 27) { px('#f1eee6', rect(2, 1, 14, 7)); px('#d3cec2', rect(2, 6, 14, 7)); }
         }
         if (tile === 28) px('#a57b45', (x, y) => y > 10);
+        if (tile === 29) {
+            // Lava: molten blobs with bright cores.
+            for (const [cx, cy, r] of [[4, 4, 3], [11, 6, 2.5], [6, 12, 2.8], [13, 13, 2]]) {
+                px('#ff9a2a', (x, y) => Math.hypot(x - cx, y - cy) < r);
+                px('#ffe07a', (x, y) => Math.hypot(x - cx, y - cy) < r * .45);
+            }
+        }
+        if (tile === 30) {
+            // Ice crystal: pale shards on a see-through background.
+            clear(() => true);
+            for (const [bx, w, h] of [[3, 3, 11], [7, 3, 15], [11, 3, 9]]) {
+                px('#bfe8ff', (x, y) => y > 16 - h && Math.abs(x - bx - 1.5) < w / 2 * (y - 16 + h) / h + .5);
+                px('#f2fbff', (x, y) => y > 16 - h + 2 && Math.abs(x - bx - 1) < .6);
+            }
+        }
+        if (tile === 31) {
+            // Quicksand: sand with a slightly darker swirl, easy to miss.
+            px('#c2aa70', (x, y) => Math.abs(Math.hypot(x - 8, y - 8) - 4) < .5);
+        }
+        // Vine: leaves along a strand (drawn stretched over thin hanging boxes).
+        if (tile === 32) px('#5a9a3c', (x, y) => (Math.floor(y) + Math.floor(x / 4)) % 4 === 0);
+        if (tile === 33) {
+            // Glow mushroom: a teal cap over a pale stem.
+            px('#3fd8c2', (x, y) => y < 8);
+            px('#b8fff2', (x, y) => y < 8 && [[3, 3], [9, 2], [12, 5], [6, 6]].some(([dx, dy]) => Math.hypot(x - dx, y - dy) < 1.2));
+        }
+        if (tile === 34) {
+            // Torch: a stick with a flame on top (drawn across the whole width; the post squeezes it).
+            px('#ffd24a', (x, y) => y < 5);
+            px('#ff8a2a', (x, y) => y > 1 && y < 5);
+        }
+        if (tile === 35) px('#c4a86c', (x, y) => y % 5 < 1);
+        if (tile === 36) px('#5f8a3e', (x, y) => (Math.floor(x) * 13 + Math.floor(y) * 7) % 11 < 4 && y < 9);
+        // Torch stick: a lighter grain line. Flame: a yellow-white core.
+        if (tile === 40) px('#8a6238', (x, y) => Math.floor(x) % 5 === 2);
+        if (tile === 41) { px('#ffe07a', (x, y) => x > 4 && x < 12 && y > 3); px('#fff6d0', (x, y) => x > 6 && x < 10 && y > 7); }
+        if (tile === 39) px('#ffffff', (x, y) => [[4, 4], [11, 6], [7, 11], [13, 12], [3, 13]].some(([cx, cy]) => Math.hypot(x - cx, y - cy) < 1.5));
+        if (tile === 38) { px('#b8ad9c', (x, y) => Math.floor(x) % 5 === 1); px('#76695a', (x, y) => Math.floor(x) % 5 === 3 && Math.floor(y) % 4 !== 0); }
+        if (tile === 37) px('#ffd0ea', (x, y) => [[4, 4], [11, 5], [7, 11], [13, 12], [3, 12]].some(([cx, cy]) => Math.hypot(x - cx, y - cy) < 1.3));
         if (tile >= 7 && tile <= 9) {
             ctx.strokeStyle = '#624323';
             ctx.lineWidth = 1;
@@ -155,43 +196,101 @@ export function makeAtlas() {
     });
     return { texture, previews };
 }
+// Block light takes on each cave's mood: icy blue, lava red, mossy green. On the surface it's warm torchlight.
+const TINT: Record<Biome, THREE.Color> = {
+    snow: new THREE.Color('#9fd8ff'), mountain: new THREE.Color('#ff8a4a'), forest: new THREE.Color('#aaff88'),
+    desert: new THREE.Color('#ffc878'), ocean: new THREE.Color('#6fe8dc'), plains: new THREE.Color('#ffd49a'),
+};
+const TORCHLIGHT = new THREE.Color('#ffe0b0');
 // Builds the solid terrain, or with `water` only the see-through water surface.
-export function terrainGeometry(world: World, water = false) {
-    const positions: number[] = [], normals: number[] = [], uvs: number[] = [], indices: number[] = [];
+// Each face carries the brightness of the cell it looks into: sky light, then tinted block light as RGB.
+// Without `light`, full daylight.
+export function terrainGeometry(world: World, water = false, light?: Light) {
+    const positions: number[] = [], normals: number[] = [], uvs: number[] = [], indices: number[] = [], lights: number[] = [];
+    const shade = (x: number, y: number, z: number) => {
+        if (!light || y >= SIZE_Y) return [1, 0, 0, 0];
+        if (x < 0 || z < 0 || x >= SIZE_X || z >= SIZE_Z || y < 0) return [0, 0, 0, 0];
+        const i = x + SIZE_X * (z + SIZE_Z * y), glow = BRIGHTNESS[light.block[i]], tint = y < GROUND ? TINT[biomeAt(x, z)] : TORCHLIGHT;
+        return [BRIGHTNESS[light.sky[i]], tint.r * glow, tint.g * glow, tint.b * glow];
+    };
     visibleFaces(world, (x, y, z, id, face) => {
-        if ((id === WATER) !== water) return;
         const { n, c } = FACES[face];
         const start = positions.length / 3;
-        const tile = tileFor(id, face);
+        // Light sources glow at full brightness themselves.
+        const tile = tileFor(id, face), lit = LIGHT[id] ? [0, 1, 1, 1] : shade(x + n[0], y + n[1], z + n[2]);
         c.forEach((corner, i) => {
             positions.push(x + corner[0], y + corner[1], z + corner[2]);
             normals.push(...n);
+            lights.push(...lit);
             uvs.push((tile + ([0, 1, 1, 0][i] ? .999 : .001)) / palettes.length, [0, 0, 1, 1][i] ? .999 : .001);
         });
         indices.push(start, start + 1, start + 2, start, start + 2, start + 3);
-    });
+    }, water);
     if (!water)
         for (let y = 0; y < SIZE_Y; y++) for (let z = 0; z < SIZE_Z; z++) for (let x = 0; x < SIZE_X; x++) {
-            const id = world.get(x, y, z);
-            if (!SHAPED.includes(id)) continue;
+            const id = world.data[x + SIZE_X * (z + SIZE_Z * y)];
+            if (!IS_SHAPED[id]) continue;
             // The whole tile is stretched over each face of the shape; fine at these sizes.
-            for (const [min, max] of shapeBoxes(world, x, y, z, id)) FACES.forEach(({ n, c }, face) => {
+            const lit = LIGHT[id] ? [0, 1, 1, 1] : shade(x, y, z);
+            for (const [min, max, boxTile] of shapeBoxes(world, x, y, z, id)) FACES.forEach(({ n, c }, face) => {
                 const start = positions.length / 3;
-                const tile = (id === DOOR || id === OPEN_DOOR) && world.get(x, y - 1, z) === id ? 25 : tileFor(id, face);
+                const tile = boxTile ?? ((id === DOOR || id === OPEN_DOOR) && world.get(x, y - 1, z) === id ? 25 : tileFor(id, face));
                 c.forEach((corner, i) => {
                     positions.push(x + min[0] + corner[0] * (max[0] - min[0]), y + min[1] + corner[1] * (max[1] - min[1]), z + min[2] + corner[2] * (max[2] - min[2]));
                     normals.push(...n);
+                    lights.push(...lit);
                     uvs.push((tile + ([0, 1, 1, 0][i] ? .999 : .001)) / palettes.length, [0, 0, 1, 1][i] ? .999 : .001);
                 });
                 indices.push(start, start + 1, start + 2, start, start + 2, start + 3);
             });
         }
-    return buildGeometry(positions, normals, uvs, indices);
+    return buildGeometry(positions, normals, uvs, indices, lights);
 }
-type Box = [[number, number, number], [number, number, number]];
+// Min and max corners, and optionally its own atlas tile.
+type Box = [[number, number, number], [number, number, number], number?];
 // Boxes (in cell coordinates) drawn for a door or bed in place of a cube.
 export function shapeBoxes(world: World, x: number, y: number, z: number, id: number): Box[] {
     if (id === BED || id === BED_HEAD) return [[[0, 0, 0], [1, BED_HEIGHT, 1]]];
+    if (id === TORCH) return torchBoxes(0, 0);
+    if (WALL_TORCHES.includes(id)) return torchBoxes(...WALL_SIDES[WALL_TORCHES.indexOf(id)] as [number, number]);
+    if (id === DRIPSTONE) {
+        // A blocky spike, three steps narrowing toward its tip: down from a ceiling, otherwise up from the floor.
+        // A spike that continues into the next cell is drawn as a thick base column.
+        const down = world.blocking(x, y + 1, z) && (!world.blocking(x, y - 1, z) || world.get(x, y - 1, z) === DRIPSTONE);
+        if (world.get(x, y + (down ? -1 : 1), z) === DRIPSTONE) return [[[.18, 0, .18], [.82, 1, .82]]];
+        const steps: [number, number, number][] = [[.18, 0, .35], [.3, .35, .68], [.41, .68, 1]];
+        return steps.map(([inset, lo, hi]) => [[inset, down ? 1 - hi : lo, inset], [1 - inset, down ? 1 - lo : hi, 1 - inset]]);
+    }
+    if (id === VINE) {
+        // Three hanging strands, set per cell so neighbouring vines don't line up, each with a leaf.
+        const hash = (x * 73856093 ^ z * 19349663 ^ y * 83492791) >>> 0;
+        return [0, 1, 2].flatMap(i => {
+            const sx = .1 + ((hash >> (i * 4)) & 15) / 16 * .7, sz = .1 + ((hash >> (i * 4 + 12)) & 15) / 16 * .7, leaf = ((hash >> (i * 3 + 24)) & 7) / 8 * .7;
+            return [[[sx, 0, sz], [sx + .08, 1, sz + .08]], [[sx - .06, leaf, sz - .06], [sx + .14, leaf + .14, sz + .14]]] as Box[];
+        });
+    }
+    if (id === GLOW_CORAL) {
+        // A little blocky tree: a trunk forking into branches that turn upward, each ending in a brighter tip.
+        // Per-cell hashing turns and reshapes each one so a reef doesn't repeat.
+        const hash = (x * 73856093 ^ z * 19349663 ^ y * 83492791) >>> 0, t = 1 / 16;
+        const turn = hash & 1, flip = hash & 2 ? -1 : 1, tall = (hash >> 2) & 3;
+        const at = (u: number, v: number) => turn ? [.5 + flip * (v - .5), .5 + (u - .5)] : [.5 + flip * (u - .5), .5 + (v - .5)];
+        const box = (u0: number, y0: number, v0: number, u1: number, y1: number, v1: number): Box => {
+            const [a0, b0] = at(u0, v0), [a1, b1] = at(u1, v1);
+            return [[Math.min(a0, a1), y0, Math.min(b0, b1)], [Math.max(a0, a1), y1, Math.max(b0, b1)]];
+        };
+        // Branches: [start height, reach sideways (u), reach sideways (v), height it rises to].
+        const branches = [[4, -4, 0, 10 + tall], [6, 4, 1, 12 - tall], [3, 1, -4, 8 + tall], [8, -1, 4, 13]];
+        const boxes: Box[] = [box(7.3 * t, 0, 7.3 * t, 8.7 * t, (13 + tall) * t, 8.7 * t), box(7 * t, (13 + tall) * t, 7 * t, 9 * t, (14.5 + tall / 2) * t, 9 * t)];
+        for (const [from, du, dv, to] of branches) {
+            const u = 8 + du, v = 8 + dv;
+            boxes.push(box(Math.min(8, u) * t, from * t, Math.min(8, v) * t, (Math.max(8, u) + 1.2) * t, (from + 1.2) * t, (Math.max(8, v) + 1.2) * t));
+            boxes.push(box(u * t, from * t, v * t, (u + 1.2) * t, to * t, (v + 1.2) * t));
+            boxes.push(box((u - .4) * t, to * t, (v - .4) * t, (u + 1.6) * t, (to + 1.5) * t, (v + 1.6) * t));
+        }
+        return boxes;
+    }
+    if (id === GLOW_MUSHROOM) return [[[7 / 16, 0, 7 / 16], [9 / 16, 4 / 16, 9 / 16]], [[4 / 16, 4 / 16, 4 / 16], [12 / 16, 7 / 16, 12 / 16]]];
     // A door spans the gap between its walls: along x when there's a wall beside it on x, else along z.
     // Both halves decide from the bottom half, so they always agree. Open, it turns 90° against the hinge edge.
     const base = world.get(x, y - 1, z) === id ? y - 1 : y;
@@ -199,6 +298,18 @@ export function shapeBoxes(world: World, x: number, y: number, z: number, id: nu
     const t = 3 / 16, mid: [number, number] = [.5 - t / 2, .5 + t / 2];
     if (id === DOOR) return [alongX ? [[0, 0, mid[0]], [1, 1, mid[1]]] : [[mid[0], 0, 0], [mid[1], 1, 1]]];
     return [alongX ? [[0, 0, 0], [t, 1, 1]] : [[0, 0, 0], [1, 1, t]]];
+}
+// A small torch: a thin stick with a flame on top. Standing, it's in the middle of the cell; fixed to a wall
+// on side (dx, dz), it leans out from that wall in three blocky steps.
+function torchBoxes(dx: number, dz: number): Box[] {
+    const t = 1 / 16, STICK = 40, FLAME = 41;
+    if (!dx && !dz) return [[[7 * t, 0, 7 * t], [9 * t, 6 * t, 9 * t], STICK], [[6.5 * t, 6 * t, 6.5 * t], [9.5 * t, 8.5 * t, 9.5 * t], FLAME]];
+    // Steps as [distance from the wall, bottom, top], then the flame; mapped onto the wall's side.
+    const at = (out: number, lo: number, hi: number, half: number, tile: number): Box => {
+        const u0 = dx + dz > 0 ? 1 - (out + 2 * half) * t : out * t, u1 = u0 + 2 * half * t, v0 = .5 - half * t, v1 = .5 + half * t;
+        return dx ? [[u0, lo * t, v0], [u1, hi * t, v1], tile] : [[v0, lo * t, u0], [v1, hi * t, u1], tile];
+    };
+    return [at(0, 3, 6, 1, STICK), at(1.2, 5.5, 8.5, 1, STICK), at(2.2, 8, 10, 1, STICK), at(1.9, 10, 12.5, 1.5, FLAME)];
 }
 // Atlas tile for one face of a block (face 2 is the top, 3 the bottom).
 function tileFor(id: number, face: number) {
@@ -209,6 +320,9 @@ function tileFor(id: number, face: number) {
     if (id === WINDOW) return 23;
     if (id === DOOR || id === OPEN_DOOR) return 24;
     if (id === BED || id === BED_HEAD) return face === 2 ? (id === BED ? 26 : 27) : face === 3 ? 7 : 28;
+    if (id === GLOW_CORAL && face === 2) return 39;
+    if (id === TORCH || WALL_TORCHES.includes(id)) return 40;
+    if (id >= LAVA) return 29 + id - LAVA;
     if (id === SAND) return 10;
     if (id === WATER) return 13;
     if (id === ICE) return 16;
@@ -222,20 +336,22 @@ function tileFor(id: number, face: number) {
 }
 // A single textured block centred on the origin, for held and dropped blocks.
 export function blockGeometry(id: number) {
-    const positions: number[] = [], normals: number[] = [], uvs: number[] = [], indices: number[] = [];
+    const positions: number[] = [], normals: number[] = [], uvs: number[] = [], indices: number[] = [], lights: number[] = [];
     FACES.forEach(({ n, c }, face) => {
         const start = positions.length / 3, tile = tileFor(id, face);
         c.forEach((corner, i) => {
             positions.push(corner[0] - .5, corner[1] - .5, corner[2] - .5);
             normals.push(...n);
+            lights.push(1, 0, 0, 0);
             uvs.push((tile + ([0, 1, 1, 0][i] ? .999 : .001)) / palettes.length, [0, 0, 1, 1][i] ? .999 : .001);
         });
         indices.push(start, start + 1, start + 2, start, start + 2, start + 3);
     });
-    return buildGeometry(positions, normals, uvs, indices);
+    return buildGeometry(positions, normals, uvs, indices, lights);
 }
-function buildGeometry(positions: number[], normals: number[], uvs: number[], indices: number[]) {
+function buildGeometry(positions: number[], normals: number[], uvs: number[], indices: number[], lights: number[]) {
     const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('cellLight', new THREE.Float32BufferAttribute(lights, 4));
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));

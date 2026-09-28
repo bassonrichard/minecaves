@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { addItem, hasRoom, type Inventory, type Stack } from './crafting.ts';
 import { itemGeometry } from './items.ts';
 import { blockGeometry } from './terrain.ts';
-import { BLOCKS, WATER, type Vec3, type World } from './world.ts';
+import { BLOCKS, LAVA, WATER, type Vec3, type World } from './world.ts';
 
 // Items lying in the world, Minecraft style: they pop out, fall, bob, and wait to be picked up.
 export const DESPAWN = 300, PICKUP = 1.2, MAGNET = 3;
@@ -57,6 +57,8 @@ export function createDrops(world: World, blockMaterial: THREE.Material) {
                 }
             }
             const cell = (x: number, y: number, z: number) => world.blocking(Math.floor(x), Math.floor(y), Math.floor(z));
+            // Lava burns it up.
+            if (world.get(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z)) === LAVA) { remove(i); continue; }
             // Pushed up out of any block placed on top of it.
             while (cell(p.x, p.y, p.z) && p.y < 40) p.y = Math.floor(p.y) + 1;
             if (world.get(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z)) === WATER) drop.vy = Math.min(1, drop.vy + 30 * dt); // floats

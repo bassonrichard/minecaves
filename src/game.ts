@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
-import { BED, BED_HEAD, BIOMES, CACTUS, CHEST, DOOR, OPEN_DOOR, TREES, WATER, generateWorld, regrowTrees, settle, type Vec3 } from './world.ts';
+import { BED, BED_HEAD, BIOMES, BRIGHTNESS, CACTUS, CHEST, DOOR, ICE_CRYSTAL, LAVA, OPEN_DOOR, QUICKSAND, SIZE_X, SIZE_Z, TREES, WATER, biomeAt, computeLight, generateWorld, inside, regrowTrees, settle, type Vec3 } from './world.ts';
 import { createDrops } from './drops.ts';
 import { createHand } from './hand.ts';
 import { createAnimals } from './animals.ts';
@@ -8,8 +8,9 @@ import { Player } from './player.ts';
 import { makeAtlas, terrainGeometry } from './terrain.ts';
 import { createEnvironment } from './environment.ts';
 import { createZombie } from './zombie.ts';
+import { createCaveCreatures } from './cave.ts';
 import { clearSession, loadSession, saveSession } from './save.ts';
-import { CHEST_SLOTS, HOTBAR_SLOTS, ITEMS, MAX_HEALTH, SLOTS, STATIONS, START_HEALTH, SWORD, attackDamage, createInventory, craft, eat, held, stationsNearby, miningSeconds, harvest, moveSlot, place, toggleDoor, wear, type Inventory, type Stack } from './crafting.ts';
+import { CHEST_SLOTS, HOTBAR_SLOTS, ITEMS, MAX_HEALTH, SLOTS, STATIONS, START_HEALTH, SWORDS, attackDamage, createInventory, craft, eat, held, stationsNearby, miningSeconds, harvest, moveSlot, place, toggleDoor, wear, type Inventory, type Stack } from './crafting.ts';
 type Callbacks = {
     locked: (value: boolean) => void;
     selected: (value: number) => void;
@@ -20,7 +21,19 @@ type Callbacks = {
     crafting: (open: boolean, near: number[], chest: (Stack | null)[] | null) => void;
     mining: (progress: number, message: string) => void;
     health: (value: number, hurt: boolean) => void;
+    // How frozen you are (0–1, in tenths) and whether you're on fire.
+    status: (frost: number, burning: boolean) => void;
 };
+// Lights terrain by its baked (sky, block) brightness: sky light scales the sun and moon, block light glows on its own.
+// Block light only adds what daylight doesn't already give, so torches don't wash out the day.
+function caveLit(material: THREE.MeshLambertMaterial, daylight: { value: number }) {
+    material.onBeforeCompile = shader => {
+        shader.uniforms.daylight = daylight;
+        shader.vertexShader = 'attribute vec4 cellLight;\nvarying vec4 vCellLight;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvCellLight = cellLight;');
+        shader.fragmentShader = 'uniform float daylight;\nvarying vec4 vCellLight;\n' + shader.fragmentShader.replace('#include <emissivemap_fragment>',
+            '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * max(vCellLight.yzw - vCellLight.x * daylight, 0.);\ndiffuseColor.rgb *= max(vCellLight.x, .004);');
+    };
+}
 export function createGame(host: HTMLElement, callbacks: Callbacks) {
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -44,16 +57,22 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
     callbacks.previews(previews);
     // alphaTest cuts out window panes without any transparency sorting.
     const material = new THREE.MeshLambertMaterial({ map: texture, alphaTest: .5 });
-    const terrain = new THREE.Mesh(terrainGeometry(world), material);
+    const daylight = { value: 1 };
+    let light = computeLight(world);
+    const terrain = new THREE.Mesh(terrainGeometry(world, false, light), material);
     // Water is a separate see-through mesh; the raycaster ignores it, so you aim and build through it.
     // Double-sided so that, from underwater, the surface closes over you like a ceiling.
     const waterMaterial = new THREE.MeshLambertMaterial({ map: texture, transparent: true, opacity: .7, depthWrite: false, side: THREE.DoubleSide });
-    const water = new THREE.Mesh(terrainGeometry(world, true), waterMaterial);
+    const water = new THREE.Mesh(terrainGeometry(world, true, light), waterMaterial);
+    caveLit(material, daylight); caveLit(waterMaterial, daylight);
     scene.add(terrain, water);
     const wildlife = createAnimals(world);
     // Chickens killed before the reload stay gone.
     saved?.animals.forEach((alive, i) => { if (!alive && wildlife.group.children[i]) wildlife.group.children[i].visible = false; });
     scene.add(wildlife.group);
+    // Bats, spiders, and cave snakes, down in the dark.
+    const cave = createCaveCreatures(world);
+    scene.add(cave.group);
     // One themed zombie per biome each night.
     const zombies = BIOMES.map(biome => createZombie(world, biome));
     zombies.forEach((zombie, i) => { scene.add(zombie.root); if (saved?.zombies[i]) zombie.restore(saved.zombies[i]); });
@@ -93,6 +112,8 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
     function resetMining() { miningHeld = false; miningTarget = ''; miningTime = 0; miningStatus(0, ''); }
     if (saved) inventory.slots = saved.slots;
     let health = saved?.health ?? START_HEALTH, knockX = 0, knockZ = 0, cactusCooldown = 0, wasFull = false;
+    // Cave hazards: frost builds from 0 to 1, `burning` counts down the seconds you stay on fire.
+    let frost = 0, burning = 0, frostCooldown = 0, burnCooldown = 0, sandCooldown = 0, lastStatus = '';
     const bedAt = (at: Vec3) => [BED, BED_HEAD].includes(world.get(Math.floor(at.x), Math.floor(at.y), Math.floor(at.z)));
     // Spills a stack list out at a spot, like a defeat or a broken chest.
     function spill(stacks: (Stack | null)[], at: Vec3) {
@@ -112,7 +133,7 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
             if (spawn && bedAt(spawn)) Object.assign(player.position, { x: spawn.x, y: Math.floor(spawn.y) + 1, z: spawn.z });
             else Object.assign(player.position, new Player(world).position);
             player.velocityY = 0; player.fallFrom = null; knockX = knockZ = 0;
-            health = START_HEALTH;
+            health = START_HEALTH; frost = burning = 0;
             zombies.forEach(zombie => zombie.despawn());
             publishInventory(); callbacks.health(health, false);
             miningStatus(0, 'You died · your items are where you fell');
@@ -171,14 +192,36 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
         hand.swing();
         publishInventory();
     }
-    // The first cactus cell the player's body is brushing against, if any.
-    function touchingCactus() {
+    // The first cell of this block the player's body is in or brushing against, if any.
+    function touching(id: number) {
         const p = player.position;
         for (let x = Math.floor(p.x - .36); x <= Math.floor(p.x + .36); x++)
             for (let y = Math.floor(p.y - .05); y <= Math.floor(p.y + 1.8); y++)
                 for (let z = Math.floor(p.z - .36); z <= Math.floor(p.z + .36); z++)
-                    if (world.get(x, y, z) === CACTUS) return { x: x + .5, y, z: z + .5 };
+                    if (world.get(x, y, z) === id) return { x: x + .5, y, z: z + .5 };
         return null;
+    }
+    const bodyAt = (dy: number) => world.get(Math.floor(player.position.x), Math.floor(player.position.y + dy), Math.floor(player.position.z));
+    // One physics step of cave hazards: ice crystals and icy water freeze you, lava sets you alight, quicksand smothers.
+    function hazards(dt: number) {
+        const p = player.position, swimming = bodyAt(.1) === WATER, inLava = bodyAt(.1) === LAVA || bodyAt(.9) === LAVA;
+        const chilled = !!touching(ICE_CRYSTAL) || (swimming && biomeAt(p.x, p.z) === 'snow');
+        frost = Math.min(1, Math.max(0, frost + (chilled ? dt / 3 : -dt / 2)));
+        frostCooldown -= dt; burnCooldown -= dt; sandCooldown -= dt;
+        if (frost >= 1 && frostCooldown <= 0) { frostCooldown = 2; hurt(1); miningStatus(0, "You're freezing · get away from the ice"); }
+        if (inLava && !burning) miningStatus(0, "You're on fire · jump in water");
+        burning = inLava ? 4 : swimming ? 0 : Math.max(0, burning - dt);
+        if (burning && burnCooldown <= 0) { burnCooldown = inLava ? .5 : 1; hurt(1); }
+        if (bodyAt(1.62) === QUICKSAND && sandCooldown <= 0) { sandCooldown = 1; hurt(1); miningStatus(0, 'Sinking in quicksand · hold Space to climb out'); }
+        const status = `${Math.round(frost * 10) / 10},${burning > 0}`;
+        if (status !== lastStatus) { lastStatus = status; callbacks.status(Math.round(frost * 10) / 10, burning > 0); }
+    }
+    // Brightness at the eye: how open to the sky it is, and the glow of anything nearby.
+    function lightAt(eye: Vec3) {
+        const x = Math.floor(eye.x), y = Math.floor(eye.y), z = Math.floor(eye.z);
+        if (!inside(x, y, z)) return { sky: 1, block: 0 };
+        const i = x + SIZE_X * (z + SIZE_Z * y);
+        return { sky: BRIGHTNESS[light.sky[i]], block: BRIGHTNESS[light.block[i]] };
     }
     function pause() { keys.clear(); resetMining(); if (controls.isLocked) controls.unlock(); }
     function publishPanel() { callbacks.crafting(craftingOpen, craftingOpen ? stationsNearby(world, player.position) : [], openChest && openChest.map(stack => stack && { ...stack })); }
@@ -199,12 +242,14 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
     // Sunrise: animals come back fresh, and trees gone for two days grow back.
     function dawn() {
         wildlife.respawn();
+        cave.respawn();
         if (regrowTrees(world, environment.day(), treesMissingSince, player.position)) rebuild();
     }
     function rebuild() {
         // ponytail: rebuild the bounded world; use dirty chunk meshes for larger maps.
+        light = computeLight(world);
         for (const [mesh, isWater] of [[terrain, false], [water, true]] as const) {
-            const old = mesh.geometry; mesh.geometry = terrainGeometry(world, isWater); old.dispose();
+            const old = mesh.geometry; mesh.geometry = terrainGeometry(world, isWater, light); old.dispose();
         }
     }
     controls.addEventListener('lock', () => { played = true; callbacks.locked(true); keys.clear(); accumulator = 0; });
@@ -258,10 +303,20 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
             }
             // Dead chickens stay in the group hidden; skip them so they don't eat clicks.
             const animalHit = wildlife.group.visible ? raycaster.intersectObjects(wildlife.group.children.filter(animal => animal.visible), true)[0] : undefined;
+            const caveHit = raycaster.intersectObjects(cave.group.children.filter(creature => creature.visible), true)[0];
+            if (caveHit && caveHit.distance < reach && (!zombieHit || caveHit.distance <= zombieHit.distance) && (!animalHit || caveHit.distance <= animalHit.distance)) {
+                resetMining();
+                const result = cave.hit(caveHit.object, damage, player.position);
+                if (result) {
+                    if (SWORDS.includes(held(inventory, selected))) { wear(inventory, selected); publishInventory(); }
+                    miningStatus(0, `${result.name} ${result.dead ? 'defeated' : 'hit'}`);
+                }
+                return;
+            }
             if (zombieHit && zombieHit.distance < reach && (!animalHit || zombieHit.distance <= animalHit.distance)) {
                 resetMining();
                 const dead = zombie.hit(damage);
-                if (held(inventory, selected) === SWORD) { wear(inventory, selected); publishInventory(); }
+                if (SWORDS.includes(held(inventory, selected))) { wear(inventory, selected); publishInventory(); }
                 miningStatus(0, `${zombie.root.name} ${dead ? 'defeated' : 'hit'}`);
                 return;
             }
@@ -269,7 +324,7 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
                 const result = wildlife.damage(animalHit.object, damage);
                 if (result) {
                     resetMining();
-                    if (held(inventory, selected) === SWORD) wear(inventory, selected);
+                    if (SWORDS.includes(held(inventory, selected))) wear(inventory, selected);
                     const name = wildlife.group.children.find(animal => animal.getObjectById(animalHit.object.id))?.name ?? 'Animal';
                     if (result.dead) {
                         // Loot pops out where the animal stood, for you to walk over.
@@ -298,7 +353,8 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
         if (used === BED || used === BED_HEAD) { sleep(target.x, target.y, target.z); return; }
         const point = intersection.point.clone().addScaledVector(intersection.face.normal, .001).floor();
         camera.getWorldDirection(direction);
-        if (place(world, player.position, inventory, selected, point.x, point.y, point.z, [direction.x, direction.z])) {
+        const normal = intersection.face.normal;
+        if (place(world, player.position, inventory, selected, point.x, point.y, point.z, [direction.x, direction.z], [Math.round(normal.x), Math.round(normal.y), Math.round(normal.z)])) {
             settle(world, point.x, point.y, point.z);
             rebuild(); publishInventory();
         }
@@ -324,13 +380,14 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
     const observer = new ResizeObserver(resize);
     observer.observe(host);
     resize();
-    const direction = new THREE.Vector3();
+    const direction = new THREE.Vector3(), caveGlow = new THREE.Color();
     function animate(now: number) {
         if (disposed)
             return;
         const elapsed = Math.min((now - previous) / 1000, .1);
         previous = now;
         environment.update(elapsed, camera);
+        daylight.value = environment.daylight();
         if (environment.day() !== day) { day = environment.day(); dawn(); }
         // Friendly animals head off at dusk; dawn() brings them back.
         wildlife.group.visible = !environment.night();
@@ -346,7 +403,8 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
             const night = environment.night();
             let forward = Number(keys.has('KeyW')) - Number(keys.has('KeyS'));
             let right = Number(keys.has('KeyD')) - Number(keys.has('KeyA'));
-            const length = Math.hypot(forward, right) || 1;
+            // Freezing slows you down, to half speed when frozen through.
+            const length = (Math.hypot(forward, right) || 1) / (1 - frost * .5);
             forward /= length;
             right /= length;
             while (accumulator >= 1 / 120) {
@@ -355,19 +413,23 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
                 knockX *= .9; knockZ *= .9;
                 accumulator -= 1 / 120;
                 cactusCooldown -= 1 / 120;
-                const cactus = cactusCooldown <= 0 ? touchingCactus() : null;
+                const cactus = cactusCooldown <= 0 ? touching(CACTUS) : null;
                 if (cactus) { cactusCooldown = .5; hurt(1, cactus); }
+                hazards(1 / 120);
                 for (const zombie of zombies) {
                     const damage = zombie.update(1 / 120, night, player.position);
                     if (damage) hurt(damage, zombie.root.position);
                 }
             }
+            for (const bite of cave.update(elapsed, player.position)) { hurt(bite.damage, bite.from); miningStatus(0, `Bitten by a ${bite.name.toLowerCase()}`); }
             camera.position.set(player.position.x, player.position.y + 1.62, player.position.z);
             const { picked, full } = drops.update(elapsed, player.position, inventory);
             if (picked) publishInventory();
             if (full && !wasFull) miningStatus(0, 'Inventory full');
             wasFull = full;
-            hand.update(elapsed, (forward !== 0 || right !== 0) && player.grounded, environment.daylight(), camera.aspect);
+            // The hand is lit like the spot you stand in: dark deep in a cave, glowing by a torch.
+            const here = lightAt(camera.position);
+            hand.update(elapsed, (forward !== 0 || right !== 0) && player.grounded, Math.max(here.sky * Math.max(.2, environment.daylight()), here.block), camera.aspect);
             const intersection = hit();
             outline.visible = !!intersection;
             if (intersection?.face) {
@@ -381,7 +443,7 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
                 const seconds = miningSeconds(inventory, selected, world.get(p.x, p.y, p.z));
                 if (p.y === 0 || seconds === null) {
                     miningTime = 0;
-                    miningStatus(0, p.y === 0 ? 'The bottom layer cannot be broken' : 'Equip a wooden pickaxe to mine stone');
+                    miningStatus(0, p.y === 0 ? 'The bottom layer cannot be broken' : world.get(p.x, p.y, p.z) === LAVA ? "Lava can't be mined" : 'Equip a pickaxe to mine this');
                 } else {
                     miningTime += elapsed;
                     hand.swing();
@@ -407,10 +469,16 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
                 miningTime = 0; miningTarget = ''; miningStatus(0, 'Move closer to a block');
             }
         }
-        // Underwater: close, blue fog. environment.update restores the colour each frame; restore the range here.
-        const fog = scene.fog as THREE.Fog, eyeWet = world.get(Math.floor(camera.position.x), Math.floor(camera.position.y), Math.floor(camera.position.z)) === WATER;
-        if (eyeWet) { fog.color.set('#1d4f86'); (scene.background as THREE.Color).set('#1d4f86'); }
-        fog.near = eyeWet ? .1 : 35; fog.far = eyeWet ? 14 : 75;
+        // Underwater: close, blue fog; in lava, orange. Underground, the fog closes in and fades to black.
+        // environment.update restores the colour each frame; restore the range here.
+        const fog = scene.fog as THREE.Fog, background = scene.background as THREE.Color;
+        const eye = world.get(Math.floor(camera.position.x), Math.floor(camera.position.y), Math.floor(camera.position.z)), open = lightAt(camera.position).sky;
+        fog.color.multiplyScalar(open); background.multiplyScalar(open);
+        // Underwater is blue, fading toward deep teal-black in the sea caves.
+        if (eye === WATER) { fog.color.set('#1d4f86').multiplyScalar(Math.max(open, .3)); background.copy(fog.color); }
+        if (eye === LAVA) { fog.color.set('#c2410c'); background.set('#c2410c'); }
+        fog.near = eye === WATER ? .1 : eye === LAVA ? 0 : 4 + 31 * open; fog.far = eye === WATER ? 14 : eye === LAVA ? 2 : 28 + 47 * open;
+        cave.shade(at => { const here = lightAt({ x: at.x, y: at.y + .3, z: at.z }); return { lit: here.sky, glow: caveGlow.setScalar(Math.max(here.block, .03)) }; });
         renderer.render(scene, camera);
         if (controls.isLocked) {
             // The held item draws on top of the world, with its own depth.
@@ -460,6 +528,7 @@ export function createGame(host: HTMLElement, callbacks: Callbacks) {
                 controls.unlock();
             controls.dispose();
             wildlife.dispose();
+            cave.dispose();
             drops.dispose();
             hand.dispose();
             zombies.forEach(zombie => zombie.dispose());

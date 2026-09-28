@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CHICKEN_MEAT, FEATHER, MUTTON, WOOL, type Stack } from './crafting.ts';
-import { BIOME_SIZE, CACTUS, SEA_LEVEL, SIZE_X, SIZE_Y, SIZE_Z, WATER, biomeAt, biomeOrigin, type Biome, type World } from './world.ts';
+import { BIOME_SIZE, CACTUS, LAVA, QUICKSAND, SEA_LEVEL, SIZE_X, SIZE_Y, SIZE_Z, VINE, WATER, biomeAt, biomeOrigin, type Biome, type World } from './world.ts';
 
 // Chickens, geckos, and Garry keep their original slots (0–7) so saved defeats line up; new animals go at the end.
 const SPECS: { kind: string; biome: Biome; radius: number; height: number; speed: number; starts: number[][] }[] = [
@@ -30,8 +30,8 @@ export function animalGround(world: World, x: number, z: number, radius: number,
         for (let iz = Math.floor(z - radius); iz <= Math.floor(z + radius - 1e-6); iz++) {
             let y = SIZE_Y - 1;
             while (y >= 0 && !world.get(ix, y, iz)) y--;
-            // Land animals avoid treetops, water, and cacti.
-            if (y < 0 || y + 1 + height > SIZE_Y || [5, WATER, CACTUS].includes(world.get(ix, y, iz))) return null;
+            // Land animals avoid treetops, water, cacti, vines, lava, and quicksand.
+            if (y < 0 || y + 1 + height > SIZE_Y || [5, WATER, CACTUS, VINE, LAVA, QUICKSAND].includes(world.get(ix, y, iz))) return null;
             highest = Math.max(highest, y + 1);
             lowest = Math.min(lowest, y + 1);
         }

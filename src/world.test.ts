@@ -3,7 +3,7 @@ import test from 'node:test';
 import * as THREE from 'three';
 import { Mesh, MeshBasicMaterial, Raycaster, Vector3 } from 'three';
 import { terrainGeometry } from './terrain.ts';
-import { World, generateWorld, visibleFaces, canPlace, editBlock, BIOMES, BLOCKS, SAND, SEA_LEVEL, SIZE_X, SIZE_Y, SIZE_Z, SNOW, WATER, CACTUS, ICE, biomeAt, flowWater, settle } from './world.ts';
+import { World, generateWorld, visibleFaces, canPlace, editBlock, BIOMES, BLOCKS, GROUND, SAND, SEA_LEVEL, SIZE_X, SIZE_Y, SIZE_Z, SNOW, WATER, CACTUS, ICE, biomeAt, flowWater, settle } from './world.ts';
 import { Player } from './player.ts';
 test('voxel bounds, generation, visible faces, movement, and editing', () => {
     const world = new World();
@@ -25,7 +25,8 @@ test('voxel bounds, generation, visible faces, movement, and editing', () => {
     assert.equal(countFaces(), 6);
     assert.deepEqual(generateWorld().data, generateWorld().data);
     const generated = generateWorld();
-    assert.deepEqual(new Set(generated.data), new Set([0, 1, 2, 3, 4, 5, SAND, SNOW, WATER, CACTUS, ICE]));
+    // Everything but the placed-only blocks (tables, stations, furniture) turns up somewhere in the generated world.
+    assert.deepEqual([...new Set(generated.data)].sort((a, b) => a - b), [0, 1, 2, 3, 4, 5, SAND, SNOW, WATER, CACTUS, ICE, ...Array.from({ length: BLOCKS.length - 21 }, (_, i) => 21 + i)]);
     // Six 32×32 biomes: snow, mountain, forest on top; ocean, plains, desert below.
     assert.deepEqual([[5, 5], [40, 5], [70, 5], [5, 40], [40, 40], [70, 40]].map(([x, z]) => biomeAt(x, z)), [...BIOMES]);
     const top = (x: number, z: number) => { let y = SIZE_Y - 1; while (!generated.get(x, y, z)) y--; return { y, id: generated.get(x, y, z) }; };
@@ -34,7 +35,7 @@ test('voxel bounds, generation, visible faces, movement, and editing', () => {
     assert.equal(top(80, 45).id, SAND); // desert
     assert.equal(top(48, 48).id, 1); // plains grass
     assert.equal(top(3, 20).id, SNOW);
-    assert.ok(top(47, 15).y >= 18 && top(47, 15).id === SNOW); // snowy mountain peak
+    assert.ok(top(47, 15).y >= GROUND + 18 && top(47, 15).id === SNOW); // snowy mountain peak
     assert.equal(top(24, 22).id, ICE); // frozen pond
     assert.equal(generated.get(24, top(24, 22).y - 1, 22), WATER);
     assert.equal(top(75, 38).id, CACTUS);
@@ -47,10 +48,10 @@ test('voxel bounds, generation, visible faces, movement, and editing', () => {
     box.set(1, 1, 1, WATER);
     assert.equal(flowWater(box, [{ x: 2, y: 1, z: 1 }]), 14); // the rest of the 4×4 basin floor, around the sand
     assert.equal(box.get(4, 1, 4), WATER);
-    box.set(3, 9, 3, WATER);
-    assert.equal(flowWater(box, [{ x: 4, y: 9, z: 3 }]), 0); // too high to spread sideways
-    box.set(3, 6, 3, 3);
-    assert.equal(flowWater(box, [{ x: 3, y: 8, z: 3 }]), 2); // but it pours down onto the stone
+    box.set(3, SEA_LEVEL + 3, 3, WATER);
+    assert.equal(flowWater(box, [{ x: 4, y: SEA_LEVEL + 3, z: 3 }]), 0); // too high to spread sideways
+    box.set(3, SEA_LEVEL, 3, 3);
+    assert.equal(flowWater(box, [{ x: 3, y: SEA_LEVEL + 2, z: 3 }]), 2); // but it pours down onto the stone
     const floor = new World();
     for (let x = 0; x < SIZE_X; x++)
         for (let z = 0; z < SIZE_Z; z++)
@@ -467,7 +468,7 @@ test('sword, eating, zombie pathfinding, night spawning, fighting, and losing in
     assert.ok(staggered.snapshot().timer <= .25 && staggered.snapshot().knockX === 6);
     reloaded.dispose(); afterKill.dispose(); brawler.dispose(); tampered.dispose(); staggered.dispose();
     // On the real map, each biome's zombie spawns in its own biome, including the drowned on the sea floor.
-    const map = generateWorld(), spot = { x: 48.5, y: 9, z: 48.5 };
+    const map = generateWorld(), spot = { x: 48.5, y: GROUND + 9, z: 48.5 };
     const horde = BIOMES.map(biome => createZombie(map, biome));
     horde.forEach(z => z.update(1 / 120, true, spot));
     assert.equal(new Set(horde.map(z => z.root.name)).size, 6);
@@ -481,7 +482,7 @@ test('sword, eating, zombie pathfinding, night spawning, fighting, and losing in
 import { clearSession, loadSession, saveSession } from './save.ts';
 import { CHEST_SLOTS, GLASS } from './crafting.ts';
 import { CHEST, OPEN_DOOR, TREES } from './world.ts';
-test('session saves, validates untrusted data, migrates v2 saves, and clears', () => {
+test('session saves, validates untrusted data, and clears', () => {
     const store = new Map<string, string>();
     const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); }, removeItem: (k: string) => { store.delete(k); } };
     assert.equal(loadSession(storage), null);
@@ -507,8 +508,8 @@ test('session saves, validates untrusted data, migrates v2 saves, and clears', (
     assert.deepEqual([session.day, session.spawn, session.trees[2], session.trees[0]], [5, { x: 40.5, y: 10, z: 40.5 }, 4, -1]);
     assert.deepEqual(session.chests, [chest]); // the second entry had no chest block under it
     // Tampered saves: bad fields fall back, bad stacks and drops are dropped, broken worlds are rejected.
-    const data = JSON.parse(store.get('minecaves-session-v4')!);
-    store.set('minecaves-session-v4', JSON.stringify({ ...data, health: 99, selected: 12,
+    const data = JSON.parse(store.get('minecaves-session-v5')!);
+    store.set('minecaves-session-v5', JSON.stringify({ ...data, health: 99, selected: 12,
         slots: [{ id: SWORD, count: 2 }, { id: 999, count: 1 }, { id: 4, count: 65 }, { id: OPEN_DOOR, count: 1 }, { id: 3, count: 5, durability: 9 }, 'x'],
         drops: [{ id: 3, count: 1, x: 'a' }, { id: 3, count: 1, durability: 0, x: 5, y: 5, z: 5, age: 1e9 }],
         position: { x: 'a' }, zombies: [{ spawned: 'yes', health: 999, position: { x: 1 }, state: 7, timer: 'soon' }] }));
@@ -520,24 +521,15 @@ test('session saves, validates untrusted data, migrates v2 saves, and clears', (
     assert.deepEqual(repaired.drops, [{ id: 3, count: 1, durability: 0, x: 5, y: 5, z: 5, age: 300 }]);
     assert.equal(repaired.position, null);
     assert.deepEqual(repaired.zombies, [{ spawned: false, health: 0, position: null, state: 'wander', timer: 0, knockX: 0, knockZ: 0 }]);
-    store.set('minecaves-session-v4', JSON.stringify({ ...data, world: btoa('short') }));
+    store.set('minecaves-session-v5', JSON.stringify({ ...data, world: btoa('short') }));
     assert.equal(loadSession(storage), null);
-    store.set('minecaves-session-v4', '{not json');
+    store.set('minecaves-session-v5', '{not json');
     assert.equal(loadSession(storage), null);
-    // A v3 save predates the eight new blocks: its item IDs (sticks and up) move up by eight.
-    store.set('minecaves-session-v3', JSON.stringify({ ...data, day: undefined, spawn: undefined, chests: undefined, slots: [{ id: 18, count: 1, durability: 20 }, { id: 4, count: 3 }], drops: [{ id: 17, count: 2, durability: 0, x: 5, y: 5, z: 5, age: 0 }] }));
-    store.delete('minecaves-session-v4');
-    const fromV3 = loadSession(storage)!;
-    assert.deepEqual(fromV3.slots.slice(0, 2), [{ id: SWORD, count: 1, durability: 20 }, { id: 4, count: 3, durability: 0 }]);
-    assert.equal(fromV3.drops[0].id, CHICKEN_MEAT);
-    assert.deepEqual([fromV3.day, fromV3.spawn, fromV3.chests], [0, null, []]);
-    // A v2 save keeps its world; per-item counts become stacks, with item IDs shifted past cactus, ice, and the v4 blocks.
-    store.delete('minecaves-session-v3');
-    const oldCounts = Array(17).fill(0); oldCounts[4] = 70; oldCounts[16] = 1; // wood, and the old sword ID
-    store.set('minecaves-session-v2', JSON.stringify({ ...data, slots: undefined, counts: oldCounts, durability: [], hotbar: [1] }));
-    const migrated = loadSession(storage)!;
-    assert.deepEqual(migrated.world, world.data);
-    assert.deepEqual(migrated.slots.slice(0, 3).map(stack => stack && [stack.id, stack.count]), [[4, 64], [4, 6], [SWORD, 1]]);
+    // Saves from before the caves are left behind: a new world starts, and clearing removes them too.
+    store.clear();
+    store.set('minecaves-session-v4', JSON.stringify(data));
+    assert.equal(loadSession(storage), null);
+    saveSession(session, storage);
     clearSession(storage);
     assert.equal(store.size, 0);
     assert.equal(saveSession({ ...session }, { ...storage, setItem: () => { throw new Error('quota'); } }), false);
@@ -662,4 +654,109 @@ test('stations, cooking, smelting, doors, beds, windows, and regrowing trees', (
     regrowTrees(forest, 4, since);
     assert.equal(regrowTrees(forest, 9, since), false);
     assert.equal(forest.get(tx, ground + 2, tz), 0);
+});
+
+import { DRIPSTONE, ENTRANCES, GLOW_CORAL, ICE_CRYSTAL, LAVA, QUICKSAND, TORCH, VINE, WALL_SIDES, WALL_TORCHES, biomeOrigin, computeLight, blocking, inside } from './world.ts';
+import { STONE_PICKAXE, STONE_SWORD, STONE_TOOL_USES, toolUses } from './crafting.ts';
+import { createCaveCreatures, BITE_COOLDOWN } from './cave.ts';
+test('caves under every biome, cave light, quicksand, vines, stone tools, and cave creatures', () => {
+    const world = generateWorld();
+    // Each biome's own cave holds its signature block, and its stairs lead from the surface down into it.
+    const signature: Record<string, number> = { snow: ICE_CRYSTAL, mountain: LAVA, forest: VINE, ocean: GLOW_CORAL, plains: TORCH, desert: QUICKSAND };
+    for (const biome of BIOMES) {
+        const o = biomeOrigin(biome);
+        let found = 0, air = 0;
+        for (let x = o.x; x < o.x + 32; x++) for (let z = o.z; z < o.z + 32; z++) for (let y = 1; y < GROUND; y++) {
+            if (world.get(x, y, z) === signature[biome]) found++;
+            if (!world.get(x, y, z)) air++;
+        }
+        assert.ok(found > 0 && air > 300, `${biome}: ${found} signature blocks, ${air} air`);
+        // Walk the air from the top of the stairs: it reaches below the surface layer.
+        const [lx, lz] = ENTRANCES[biome], seen = new Set<number>();
+        let y = SIZE_Y - 1; while (!world.get(o.x + lx, y, o.z + lz)) y--;
+        const queue = [[o.x + lx, y + 1, o.z + lz]];
+        let deepest = SIZE_Y;
+        while (queue.length) {
+            const [x, cy, z] = queue.pop()!, key = x + SIZE_X * (z + SIZE_Z * cy);
+            if (seen.has(key) || !inside(x, cy, z) || cy > y + 3 || blocking(world.get(x, cy, z)) || biomeAt(x, z) !== biome) continue;
+            if ([WATER, LAVA].includes(world.get(x, cy, z)) && cy < GROUND) { deepest = Math.min(deepest, cy); continue; }
+            seen.add(key); deepest = Math.min(deepest, cy);
+            for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) queue.push([x + dx, cy + dy, z + dz]);
+        }
+        assert.ok(deepest < GROUND - 8, `${biome} stairs reach y ${deepest}`);
+    }
+    assert.ok(world.data.includes(DRIPSTONE));
+    // Light: a sealed room is pitch dark to the sky; a torch lights it, fading one level per block.
+    const room = new World();
+    for (let x = 0; x < 9; x++) for (let y = 0; y < 6; y++) for (let z = 0; z < 9; z++) room.set(x, y, z, x % 8 && y % 5 && z % 8 ? 0 : 3);
+    room.set(4, 1, 4, TORCH);
+    const light = computeLight(room), at = (x: number, y: number, z: number) => x + SIZE_X * (z + SIZE_Z * y);
+    assert.deepEqual([light.sky[at(4, 2, 4)], light.sky[at(4, 6, 4)]], [0, 15]);
+    assert.deepEqual([light.block[at(4, 1, 4)], light.block[at(5, 1, 4)], light.block[at(6, 1, 4)]], [14, 13, 12]);
+    assert.equal(light.block[at(4, 1, 10)], 0); // walls stop it
+    // Quicksand slows you and pulls you under; holding jump climbs out. Vines are climbed the same way.
+    const floor = new World();
+    for (let x = 0; x < 20; x++) for (let z = 0; z < 20; z++) { floor.set(x, 0, z, 3); for (let y = 1; y <= 3; y++) floor.set(x, y, z, x >= 8 && x < 11 ? QUICKSAND : 3); }
+    const walker = new Player(floor);
+    Object.assign(walker.position, { x: 9.5, y: 4, z: 10.5 });
+    for (let i = 0; i < 240; i++) walker.step(floor, 1 / 120, 0, 0, false);
+    assert.ok(walker.position.y < 3 && walker.position.y > 1, `sank to ${walker.position.y}`);
+    const x0 = walker.position.x;
+    walker.step(floor, 1 / 120, 4.6, 0, false);
+    assert.ok(walker.position.x - x0 < 4.6 / 120 / 2);
+    for (let i = 0; i < 600 && walker.position.x < 11.5; i++) walker.step(floor, 1 / 120, 4.6, 0, true);
+    assert.ok(walker.position.x >= 11.5 && walker.position.y >= 4, `climbed out to ${walker.position.x}, ${walker.position.y}`);
+    for (let y = 4; y < 9; y++) floor.set(15, y, 15, VINE);
+    const climber = new Player(floor);
+    Object.assign(climber.position, { x: 15.5, y: 4, z: 15.5 });
+    for (let i = 0; i < 120; i++) climber.step(floor, 1 / 120, 0, 0, true);
+    assert.ok(climber.position.y > 6);
+    let hurtByFall = 0;
+    for (let i = 0; i < 600; i++) hurtByFall += climber.step(floor, 1 / 120, 0, 0, false);
+    assert.equal(hurtByFall, 0); // sliding down a vine never hurts
+    // Stone tools: twice as fast, longer lasting, harder hitting.
+    const pack = createInventory();
+    addItem(pack, 3, 5); addItem(pack, STICKS, 3);
+    assert.equal(craft(pack, 'stone-pickaxe', []), false);
+    assert.equal(craft(pack, 'stone-pickaxe', [TABLE]), true);
+    assert.equal(craft(pack, 'stone-sword', [TABLE]), true);
+    const pick = pack.slots.findIndex(stack => stack?.id === STONE_PICKAXE), blade = pack.slots.findIndex(stack => stack?.id === STONE_SWORD);
+    assert.deepEqual([pack.slots[pick]?.durability, toolUses(STONE_SWORD)], [STONE_TOOL_USES, STONE_TOOL_USES]);
+    addItem(pack, PICKAXE, 1);
+    const wooden = pack.slots.findIndex(stack => stack?.id === PICKAXE);
+    assert.equal(miningSeconds(pack, pick, 3)! * 2, miningSeconds(pack, wooden, 3));
+    assert.equal(miningSeconds(pack, pick, LAVA), null);
+    assert.equal(attackDamage(pack, blade), 13);
+    const cavern = new World();
+    cavern.set(5, 1, 5, QUICKSAND);
+    assert.equal(harvest(cavern, { x: 1.5, y: 1, z: 1.5 }, pack, 20, 5, 1, 5), SAND);
+    // Torches stand on top of a block, fix to the side of a wall, never hang from a ceiling, and always drop a torch.
+    addItem(pack, TORCH, 3);
+    const torches = pack.slots.findIndex(stack => stack?.id === TORCH), me = { x: 1.5, y: 1, z: 1.5 };
+    cavern.set(8, 1, 8, 3);
+    assert.equal(place(cavern, me, pack, torches, 8, 2, 8, [0, 1], [0, 1, 0]), true);
+    assert.equal(cavern.get(8, 2, 8), TORCH);
+    assert.equal(place(cavern, me, pack, torches, 9, 1, 8, [0, 1], [1, 0, 0]), true); // clicked the wall's +x face
+    assert.equal(cavern.get(9, 1, 8), WALL_TORCHES[WALL_SIDES.findIndex(([dx, dz]) => dx === -1 && dz === 0)]);
+    assert.equal(place(cavern, me, pack, torches, 8, 0, 8, [0, 1], [0, -1, 0]), false);
+    assert.equal(harvest(cavern, me, pack, 20, 9, 1, 8), TORCH);
+    assert.equal(countOf(pack, TORCH), 1);
+    // Cave creatures live in every land cave; spiders chase, bite on a cooldown, and go down to a stone sword.
+    const creatures = createCaveCreatures(world);
+    assert.deepEqual(new Set(creatures.creatures.map(c => c.root.name)), new Set(['Bat', 'Spider', 'Cave snake']));
+    assert.ok(creatures.creatures.every(c => c.root.position.y < GROUND && biomeAt(c.root.position.x, c.root.position.z) === c.biome));
+    const spider = creatures.creatures.find(c => c.kind === 'spider')!, target = { ...spider.root.position };
+    target.x += .8;
+    let bites = 0;
+    for (let i = 0; i < BITE_COOLDOWN * 60 * 2.5; i++) bites += creatures.update(1 / 60, target).length;
+    assert.ok(bites >= 2 && bites <= 3, `${bites} bites`);
+    const far = { x: spider.root.position.x + 30, y: 0, z: spider.root.position.z };
+    assert.deepEqual(creatures.update(1 / 60, far), []);
+    const body = spider.root.children[0];
+    assert.deepEqual(creatures.hit(body, 13, target), { name: 'Spider', dead: false });
+    assert.deepEqual(creatures.hit(body, 13, target), { name: 'Spider', dead: true });
+    assert.equal(creatures.hit(body, 13, target), null);
+    creatures.respawn();
+    assert.equal(spider.root.visible, true);
+    creatures.dispose();
 });

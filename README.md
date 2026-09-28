@@ -20,20 +20,50 @@ npm run build
 npm run preview
 ```
 
-The world is 96 × 64 and 32 blocks tall, laid out as six 32 × 32 biomes for testing:
+The world is 96 × 64 and 64 blocks tall: the bottom 32 blocks are caves, and the surface above is laid out as six 32 × 32 biomes, each with its own cave system underneath:
 
 | | x 0–31 | x 32–63 | x 64–95 |
 |---|---|---|---|
 | **z 0–31** | Snow | Mountain (snowy peak) | Forest |
 | **z 32–63** | Ocean with a beach | Plains (spawn) | Desert |
 
-Borders are smoothed into slopes. Ocean water is see-through and swimmable: you sink slowly, and holding Space swims up and lets you hop out onto the shore. Water can't be mined and blocks can be placed into it. When you dig out a block, water pours into the gap from above, or from beside it at or below sea level. Sand falls when nothing holds it up. The desert has cacti (touching one costs a heart every half second), and the snow biome has a frozen pond: ice is slippery, and breaking it leaves water. Falls of more than three blocks hurt, unless you land in water.
+Forest trees trail climbable vines, and the desert hides four quicksand pits under its sand. Borders are smoothed into slopes. Ocean water is see-through and swimmable: you sink slowly, and holding Space swims up and lets you hop out onto the shore. Water can't be mined and blocks can be placed into it. When you dig out a block, water pours into the gap from above, or from beside it at or below sea level. Sand falls when nothing holds it up. The desert has cacti (touching one costs a heart every half second), and the snow biome has a frozen pond: ice is slippery, and breaking it leaves water. Falls of more than three blocks hurt, unless you land in water.
+
+## Caves
+
+Each biome has a cave system of its own, walled off from its neighbours and reached by a stair tunnel from the surface (the plains one starts just east of spawn). Tunnels wind down from the stairs and open into caverns hung with blocky stalactites and stalagmites (dripstone, three narrowing steps). Caves are dark: only glowing blocks light them, so craft **torches** first: 1 stick + 1 plank makes 4, by hand. Right-click the top of a block to stand a torch in the middle of it, or the side of a wall to fix one there, leaning out. Torches can't hang from ceilings, and a wall torch drops a plain torch when broken. Each cave's glow takes on its own colour.
+
+| Cave | Look | Light | Hazard |
+|---|---|---|---|
+| Snow | Ice floors | Ice crystals | Touching crystals (or swimming in the snow biome's icy water) freezes you: pixel snowflakes creep in from the edges of the screen, slows you to half speed, and at full frost costs a heart every 2 seconds. It thaws once you move away. |
+| Mountain | Stone | A lava lake | Lava costs a heart every half second and sets you on fire for 4 seconds after (a heart a second). Water puts the fire out. Dropped items burn up. |
+| Forest | Mossy stone | Glow mushrooms | Vines hang from the ceiling; hold Space on a vine to climb, or let go to slide down safely. |
+| Desert | Sandstone | None: bring torches | Quicksand floors. You sink and move at a quarter speed; with your head under, you lose a heart a second. Hold Space to climb out. Quicksand drops sand. |
+| Plains | Stone | Torches already placed, some fixed to the walls | A starter cave. |
+| Ocean | A half-flooded lake under stalactites | Glowing coral trees under the water and along the shore | Coral trees also grow on the sea floor above. You can swim through them, and they break by hand. |
+
+Every land cave except the mountain has a little lava at its deepest points. Lava can't be mined, and blocks can be placed into it, as with water.
+
+**Cave creatures** live in every cave: two bats flutter about harmlessly, while a spider and a cave snake hunt you. Unlike Garry, cave snakes bite. Hunters chase you within 8 blocks and bite for a heart every 1.2 seconds. Spiders have 18 health and snakes 14, so each takes two stone-sword hits. Everything is back home at sunrise. They're drawn as dark as the spot they stand in, but their eyes glow.
+
+**Light** is computed per cell, like Minecraft's 0–15 levels: sky light falls straight down open columns, and block light spreads from lava (15), torches (14), crystals and coral (8), and mushrooms (7). Both drop one level per block through anything see-through. Terrain faces store the light of the cell they face, and a small shader patch on the terrain material turns it into brightness: sky light scales the sun and moon, and block light glows on its own, only where daylight isn't already brighter. Fog and the held hand darken underground.
+
+## Tools
+
+| Tool | Recipe (at a table) | Uses | Speed / damage |
+|---|---|---|---|
+| Wooden pickaxe / axe | 3 planks + 2 sticks | 60 | Stone in 1.2 s, wood in 0.7 s |
+| Stone pickaxe / axe | 3 stone + 2 sticks | 150 | Stone in 0.6 s, wood in 0.45 s |
+| Wooden sword | 2 planks + 1 stick | 60 | 9 damage |
+| Stone sword | 2 stone + 1 stick | 150 | 13 damage (4 hits for a zombie) |
+
+A pickaxe is needed for stone, sandstone, mossy stone, dripstone, ice crystals, stoves, and smelters.
 
 ## Inventory and dropped items
 
 You start with an empty hotbar. There are 10 hotbar slots plus a 6 × 6 pack. Stacks hold up to 64; tools and swords take a slot each. Mined blocks and chicken loot pop out as items and are pulled in when you walk near them: they top up matching stacks first, then fill the hotbar, then the pack. When everything is full, items stay on the ground and you pick them up once you have room. Items left on the ground vanish after five minutes. Press E to see your pack, drag items between any slots, or drag them to **Drop** to throw them out. Crafting is disabled when there's no room for what it makes. When you die, everything you carried drops where you fell. Your held item shows in first person and swings when you attack, mine, place, or throw; an empty hand shows your arm.
 
-Your session (world edits, pack slots, dropped items, health, hotbar selection, position and view, time of day and day count, defeated animals, chest contents, your bed, felled trees, and tonight's zombies: their position, health, and what it was doing, so a wind-up still lands and a stagger still slides; or that it was already killed) is saved to this browser's `localStorage` every 5 seconds while playing, on pause, after crafting or moving items, and when the page is closed or reloaded. Saves from earlier versions keep their world, and their items are moved into slots with their new IDs. **Start a new world** on the pause menu erases it. The bottom layer cannot be broken, and horizontal borders are solid boundaries. Caves, hunger, infinite terrain, and multiplayer are not implemented.
+Your session (world edits, pack slots, dropped items, health, hotbar selection, position and view, time of day and day count, defeated animals, chest contents, your bed, felled trees, and tonight's zombies: their position, health, and what it was doing, so a wind-up still lands and a stagger still slides; or that it was already killed) is saved to this browser's `localStorage` every 5 seconds while playing, on pause, after crafting or moving items, and when the page is closed or reloaded. Saves from before the caves (v4 and older) don't fit the taller world, so they are set aside and a new world starts. **Start a new world** on the pause menu erases it. The bottom layer cannot be broken, and horizontal borders are solid boundaries. Cave creatures aren't saved; they come back fresh on reload. Hunger, infinite terrain, and multiplayer are not implemented.
 
 ## Your first tools
 
@@ -41,7 +71,7 @@ Your session (world edits, pack slots, dropped items, health, hotbar selection, 
 2. Open crafting with **E**. One wood makes **4 planks**; two planks make **4 sticks**; four planks make **1 crafting table**.
 3. Close crafting, resume, choose the table's hotbar slot, and right-click the ground to place it.
 4. Right-click the table, or press E within five blocks of its center. Each wooden pickaxe or axe costs **3 planks + 2 sticks**. Four logs provide enough material for a table, sticks, and both tools.
-5. Select the pickaxe to mine stone, or the axe to cut wood, planks, and tables faster. Each tool lasts **32 successfully harvested blocks**, then breaks.
+5. Select the pickaxe to mine stone, or the axe to cut wood, planks, and tables faster. Wooden tools last **60 uses** and stone ones **150**, then break. Mine a little stone and upgrade (see [Tools](#tools)).
 
 ## Home and hearth
 
@@ -74,7 +104,7 @@ Click a chicken or sheep to hit it. Both have three hearts. Chickens drop feathe
 
 ## Health and zombies
 
-You start with 3 of 10 hearts, shown as pixel hearts above the hotbar. Press F to eat (up to 10 hearts). Craft a wooden sword at a table (2 planks + 1 stick): it deals 3 damage instead of 1 and wears like other tools.
+You start with 3 of 10 hearts, shown as pixel hearts above the hotbar. Press F to eat (up to 10 hearts). Craft a wooden sword at a table (2 planks + 1 stick): it deals 9 damage instead of your fist's 5 and wears like other tools. A stone sword deals 13.
 
 Each night one themed zombie spawns inside each biome, at least 12 blocks away, and despawns at sunrise: the classic zombie (plains), frost zombie (snow), husk (desert), drowned (ocean, on the sea floor), mossy zombie (forest), and miner zombie (mountain). It wanders until you come within 10 blocks, then paths to you (BFS over walkable cells: climbs one block, drops up to three) and gives up if you get more than 16 blocks away or it can't find a route for 4 seconds. Up close it raises its arms before slamming down for 1 heart, backs off, and staggers back when hit. It has 6 health: two sword hits. Kill it and it stays gone until the next night, even across reloads. At 0 hearts you respawn at your bed (or the start) with 3 hearts; your items stay where you died.
 
@@ -87,8 +117,8 @@ Each night one themed zombie spawns inside each biome, at least 12 blocks away, 
 ## How it works
 
 1. **React and the game.** `src/main.tsx` owns the menu, palette, and messages. Its effect creates the game once per mount and disposes it on cleanup. Only UI events cross back into React; positions and animation frames do not trigger React renders. This also supports development Strict Mode's mount/cleanup/remount cycle.
-2. **Voxel coordinates.** `src/world.ts` stores one byte per cell using `x + 96 * (z + 64 * y)`. Y points upward. A block at `(x,y,z)` occupies that corner through `(x+1,y+1,z+1)`. Zero means air. Each biome has its own trigonometric height function; a 7 × 7 average blends the borders, then fixed per-biome tree positions add wood and leaves. `biomeAt(x, z)` tells animals and zombies where they are. Read/write functions reject out-of-bounds cells; `editBlock` enforces gameplay editing rules.
-3. **Rendering and textures.** `src/terrain.ts` creates a seeded 16-pixel texture atlas with separate grass sides and wood end grain. Nearest-neighbor sampling preserves pixels. Each solid block contributes only faces with air next to them; all faces share a single indexed geometry and material. `src/environment.ts` adds the sky sphere, clouds, stars, celestial bodies, and dynamic lights. A whole-world rebuild is deliberately simple for this bounded map. For larger worlds, split into chunks and rebuild only edited chunks and affected neighbors.
+2. **Voxel coordinates.** `src/world.ts` stores one byte per cell using `x + 96 * (z + 64 * y)`. Y points upward. A block at `(x,y,z)` occupies that corner through `(x+1,y+1,z+1)`. Zero means air. Each biome has its own trigonometric height function, raised by `GROUND` (32); a 7 × 7 average blends the borders, then fixed per-biome tree positions add wood and leaves. `carveCaves` then digs each biome's caves with a seeded random walk: a stair entrance, three worms drifting to different depths, each ending in a cavern, then pools and the biome's decorations. `computeLight` fills the light levels. `biomeAt(x, z)` tells animals and zombies where they are. Read/write functions reject out-of-bounds cells; `editBlock` enforces gameplay editing rules.
+3. **Rendering and textures.** `src/terrain.ts` creates a seeded 16-pixel texture atlas with separate grass sides and wood end grain. Nearest-neighbor sampling preserves pixels. Each solid block contributes only faces with air next to them; all faces share a single indexed geometry and material. Each face also carries a `cellLight` attribute: sky brightness, then block light tinted by the cave it's in. Light sources draw themselves full-bright. Every edit relights and rebuilds the whole world, about 40 ms. `src/cave.ts` owns the bats, spiders, and cave snakes. `src/environment.ts` adds the sky sphere, clouds, stars, celestial bodies, and dynamic lights. A whole-world rebuild is deliberately simple for this bounded map. For larger worlds, split into chunks and rebuild only edited chunks and affected neighbors.
 4. **Movement and collision.** `src/player.ts` treats the player as a 0.6 × 1.8 × 0.6 box, with the position at the bottom center. Each 1/120-second step moves and resolves X, Z, then Y against nearby occupied cells. Gravity changes vertical velocity, floor contact permits jumping, and ceiling contact stops upward velocity. Camera height is 1.62. The game caps elapsed time at 0.1 seconds to avoid runaway catch-up after a stall.
 5. **Interaction and lifecycle.** `src/game.ts` uses PointerLockControls for mouse look, with a center-screen ray to identify the targeted terrain face. A tiny offset toward/away from the face selects the cell to break/place. Placement cannot intersect the player. Escape, blur, and hidden tabs clear movement. ResizeObserver updates the camera and renderer. Cleanup cancels animation, removes listeners, disconnects controls/observer, and disposes GPU resources.
 
@@ -96,10 +126,10 @@ Each night one themed zombie spawns inside each biome, at least 12 blocks away, 
 
 ## Add a block
 
-Append its name to `BLOCKS`, add a palette colour and texture tile in `makeAtlas`, and pick its tiles in `tileFor`. Item IDs in `src/crafting.ts` follow `BLOCKS.length`, so they move up automatically: bump the save key and add an ID shift for the previous version in `src/save.ts`, as v4 does for v3. World-only IDs (water, open doors, bed heads) go in `NOT_ITEMS`. Held and dropped blocks reuse `tileFor` through `blockGeometry`. Non-block items get 16 × 16 pixel art in `src/items.ts`, which draws both the UI icon and the extruded 3D model. Nonzero block IDs other than water are solid. `opaque` decides which neighbours hide faces (windows and shaped blocks don't), `blocking` which cells stop bodies (open doors don't), and `World.height` how tall a cell is for collision (beds are 9/16). Doors and beds are listed in `SHAPED` and drawn from `shapeBoxes` in `src/terrain.ts`. Window panes are transparent texture pixels that the terrain material's `alphaTest` cuts out.
+Append its name to `BLOCKS`, add a palette colour and texture tile in `makeAtlas`, and pick its tiles in `tileFor` (blocks from lava onward use tile `29 + id - LAVA`). Give it a level in `LIGHT` if it glows; list it in `LIQUIDS` if it flows like water, or in `PASSABLE` if bodies walk through it. Item IDs in `src/crafting.ts` follow `BLOCKS.length`, so they move up automatically: bump the save key in `src/save.ts`, or add an ID shift for the previous version when its world still fits. World-only IDs (water, open doors, bed heads) go in `NOT_ITEMS`. Held and dropped blocks reuse `tileFor` through `blockGeometry`. Non-block items get 16 × 16 pixel art in `src/items.ts`, which draws both the UI icon and the extruded 3D model. Nonzero block IDs other than water are solid. `opaque` decides which neighbours hide faces (windows and shaped blocks don't), `blocking` which cells stop bodies (open doors don't), and `World.height` how tall a cell is for collision (beds are 9/16). Doors and beds are listed in `SHAPED` and drawn from `shapeBoxes` in `src/terrain.ts`. Window panes are transparent texture pixels that the terrain material's `alphaTest` cuts out.
 
 ## Checks
 
-The small Node test covers bounds, deterministic generation, exposed face counts, falling/jumping, walls, ceilings, world borders, and block placement/removal rules. A second end-to-end logic check covers gathering, recipe costs, table proximity, tools, durability, failed transactions, and atlas UVs for new blocks. Wildlife tests cover eight spawns, safe terrain, movement, recovery after terrain edits, chicken damage/loot, and resource disposal. Zombie tests cover the sword recipe, eating, pathfinding around walls and up steps, night-only spawning, sight/give-up ranges, wind-up before damage, sword kills, and next-night respawn. Environment tests cover day-to-night transition, stars, and cleanup. Browser checks should cover pointer capture, mouse look, edits and target outline, hotbar changes, Escape/re-entry, focus loss, resizing, and React remount cleanup.
+The small Node test covers bounds, deterministic generation, exposed face counts, falling/jumping, walls, ceilings, world borders, and block placement/removal rules. A second end-to-end logic check covers gathering, recipe costs, table proximity, tools, durability, failed transactions, and atlas UVs for new blocks. Wildlife tests cover eight spawns, safe terrain, movement, recovery after terrain edits, chicken damage/loot, and resource disposal. Cave tests cover each biome's signature block and reachable stairs, light spread, quicksand, vine climbing, stone tools, and cave creatures chasing, biting, and dying. Zombie tests cover the sword recipe, eating, pathfinding around walls and up steps, night-only spawning, sight/give-up ranges, wind-up before damage, sword kills, and next-night respawn. Environment tests cover day-to-night transition, stars, and cleanup. Browser checks should cover pointer capture, mouse look, edits and target outline, hotbar changes, Escape/re-entry, focus loss, resizing, and React remount cleanup.
 
 Fonts use Google Fonts with local sans-serif fallbacks. All terrain textures work offline.

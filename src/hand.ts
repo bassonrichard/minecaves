@@ -59,7 +59,7 @@ export function createHand(blockMaterial: THREE.Material) {
             const bob = walking ? Math.sin(time * 9) : 0;
             pivot.rotation.set(-arc * 1.1, arc * .5, -arc * .25);
             pivot.position.set(.38 - arc * .12 + bob * .012, -.5 + Math.abs(bob) * .018 - arc * .05, -.72 - arc * .1);
-            hemi.intensity = .45 + daylight * 1.6;
+            hemi.intensity = .15 + daylight * 1.6;
             sun.intensity = .3 + daylight * 1.1;
             if (camera.aspect !== aspect) { camera.aspect = aspect; camera.updateProjectionMatrix(); }
         },
